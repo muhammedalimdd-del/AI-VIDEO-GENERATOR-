@@ -1,14 +1,15 @@
 import React, { useState } from 'react';
 import { AiVideoCameraLogo } from '../Brand/AiVideoCameraLogo.tsx';
 import { signInWithGoogle } from '../../services/firebaseAuth.ts';
-import { Sparkles, ShieldCheck, Film, Gift, CheckCircle, ArrowRight, AlertCircle, Play } from 'lucide-react';
+import { Sparkles, ShieldCheck, Film, Gift, CheckCircle, ArrowRight, AlertCircle, Play, X } from 'lucide-react';
 
 interface WelcomeScreenProps {
   onSuccess: (user: any) => void;
   onExplorePreview?: () => void;
+  onClose?: () => void;
 }
 
-export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onSuccess, onExplorePreview }) => {
+export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onSuccess, onExplorePreview, onClose }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -125,7 +126,17 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onSuccess, onExplo
         </div>
 
         {/* Right / Bottom: Google Sign-in Card (5 cols) */}
-        <div className="lg:col-span-5">
+        <div className="lg:col-span-5 relative">
+          {onClose && (
+            <button
+              onClick={onClose}
+              className="absolute -top-3 -right-3 z-20 w-8 h-8 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 flex items-center justify-center transition-all cursor-pointer shadow-lg"
+              title="Close and return to homepage"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          )}
+
           <div className="bg-[#0B101D]/90 backdrop-blur-xl border border-slate-800/90 rounded-3xl p-6 sm:p-8 shadow-2xl shadow-purple-950/40 relative">
             <div className="space-y-6">
               <div>

@@ -16,6 +16,7 @@ import { CustomerTracker } from './components/CustomerTracker.tsx';
 import { AdminDashboard } from './components/Admin/AdminDashboard.tsx';
 import { BudgetContactForm } from './components/BudgetContactForm/BudgetContactForm.tsx';
 import { WelcomeScreen } from './components/Auth/WelcomeScreen.tsx';
+import { LoadingScreen } from './components/LoadingScreen.tsx';
 import { MyRequestsView } from './components/Customer/MyRequestsView.tsx';
 import { PrivacyModal, TermsModal, DataDeletionModal, ContactModal } from './components/Modals/LegalModals.tsx';
 import { initAuthListener, signOutGoogle, signInWithGoogle } from './services/firebaseAuth.ts';
@@ -27,6 +28,7 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<UserAccount | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState<boolean>(true);
   const [showWelcomeScreen, setShowWelcomeScreen] = useState<boolean>(false);
+  const [pendingActionAfterAuth, setPendingActionAfterAuth] = useState<'builder' | null>(null);
 
   const [currentView, setCurrentView] = useState<MainView>('landing');
   const [selectedStyle, setSelectedStyle] = useState<string>('Realistic cinematic');
@@ -42,23 +44,23 @@ export default function App() {
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
   const [isContactOpen, setIsContactOpen] = useState(false);
 
-  // Setup Firebase Auth listener
+  // Setup Firebase Auth listener with guaranteed safety timeout
   useEffect(() => {
+    // Guaranteed safety timeout: Never keep users stuck on loading screen longer than 800ms
+    const safetyTimer = setTimeout(() => {
+      setIsAuthLoading(false);
+    }, 800);
+
     const unsubscribe = initAuthListener((_firebaseUser, profile) => {
       setCurrentUser(profile);
       setIsAuthLoading(false);
-      // If user is not signed in and has never previewed, show welcome screen
-      if (!profile) {
-        const previewed = sessionStorage.getItem('aivm_preview_mode');
-        if (!previewed) {
-          setShowWelcomeScreen(true);
-        }
-      } else {
-        setShowWelcomeScreen(false);
-      }
+      clearTimeout(safetyTimer);
     });
 
-    return () => unsubscribe();
+    return () => {
+      clearTimeout(safetyTimer);
+      unsubscribe();
+    };
   }, []);
 
   // Check URL query parameters on load (e.g. ?id=VR-2026-8941&token=sec_... or ?admin=true or ?budget=true)
@@ -115,6 +117,7 @@ export default function App() {
     }
     // If not signed in, prompt Google sign-in
     if (!currentUser) {
+      setPendingActionAfterAuth('builder');
       setShowWelcomeScreen(true);
       return;
     }
@@ -142,6 +145,7 @@ export default function App() {
 
   const handleOpenMyRequests = () => {
     if (!currentUser) {
+      setPendingActionAfterAuth(null);
       setShowWelcomeScreen(true);
       return;
     }
@@ -154,20 +158,30 @@ export default function App() {
     await signOutGoogle();
     setCurrentUser(null);
     setCurrentView('landing');
-    setShowWelcomeScreen(true);
+    setShowWelcomeScreen(false);
   };
 
   const handleGoogleSuccess = (userProfile: UserAccount) => {
     setCurrentUser(userProfile);
     setShowWelcomeScreen(false);
-    setCurrentView('landing');
+    if (pendingActionAfterAuth === 'builder') {
+      setPendingActionAfterAuth(null);
+      setCurrentView('builder');
+    } else {
+      setCurrentView('landing');
+    }
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleExplorePreview = () => {
     sessionStorage.setItem('aivm_preview_mode', 'true');
     setShowWelcomeScreen(false);
-    setCurrentView('landing');
+    if (pendingActionAfterAuth === 'builder') {
+      setPendingActionAfterAuth(null);
+      setCurrentView('builder');
+    } else {
+      setCurrentView('landing');
+    }
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -177,19 +191,9 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  // If Welcome Screen is active (for unauthenticated first visit or prompt)
-  if (showWelcomeScreen && !currentUser) {
-    return (
-      <>
-        <WelcomeScreen
-          onSuccess={handleGoogleSuccess}
-          onExplorePreview={handleExplorePreview}
-        />
-        {/* Modals available from footer / links */}
-        <PrivacyModal isOpen={isPrivacyOpen} onClose={() => setIsPrivacyOpen(false)} />
-        <TermsModal isOpen={isTermsOpen} onClose={() => setIsTermsOpen(false)} />
-      </>
-    );
+  // Render dedicated temporary loading screen while app initializes
+  if (isAuthLoading) {
+    return <LoadingScreen onTimeout={() => setIsAuthLoading(false)} />;
   }
 
   return (
@@ -330,6 +334,18 @@ export default function App() {
       <TermsModal isOpen={isTermsOpen} onClose={() => setIsTermsOpen(false)} />
       <DataDeletionModal isOpen={isDeleteOpen} onClose={() => setIsDeleteOpen(false)} />
       <ContactModal isOpen={isContactOpen} onClose={() => setIsContactOpen(false)} />
+
+      {/* Google Authentication Modal */}
+      {showWelcomeScreen && !currentUser && (
+        <WelcomeScreen
+          onSuccess={handleGoogleSuccess}
+          onExplorePreview={handleExplorePreview}
+          onClose={() => {
+            setShowWelcomeScreen(false);
+            setPendingActionAfterAuth(null);
+          }}
+        />
+      )}
     </div>
   );
 }

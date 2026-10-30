@@ -10,9 +10,16 @@ import {
 import firebaseConfig from '../../firebase-applet-config.json';
 import { UserAccount, TrialStatus } from '../types/client.ts';
 
-// Initialize Firebase App singleton
-const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
-export const auth = getAuth(app);
+// Initialize Firebase App singleton with resilience
+let app: any = null;
+let auth: any = null;
+try {
+  app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
+  auth = getAuth(app);
+} catch (e) {
+  console.warn('Firebase initialization notice:', e);
+}
+export { auth };
 
 const provider = new GoogleAuthProvider();
 provider.addScope('https://www.googleapis.com/auth/userinfo.email');
@@ -24,7 +31,12 @@ let isSigningIn = false;
 export const initAuthListener = (
   onUserChanged: (user: User | null, profile: UserAccount | null) => void
 ) => {
-  return onAuthStateChanged(auth, async (firebaseUser) => {
+  if (!auth) {
+    onUserChanged(null, null);
+    return () => {};
+  }
+  try {
+    return onAuthStateChanged(auth, async (firebaseUser) => {
     if (firebaseUser) {
       try {
         // Sync with backend to get persisted database user & trial status
@@ -64,6 +76,11 @@ export const initAuthListener = (
       onUserChanged(null, null);
     }
   });
+} catch (err) {
+  console.warn('Firebase auth listener notice:', err);
+  onUserChanged(null, null);
+  return () => {};
+}
 };
 
 export const signInWithGoogle = async (): Promise<{

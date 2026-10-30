@@ -12,64 +12,46 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
 }) => {
   const visualCards = [
     {
-      title: 'Realistic Cinematic Videos',
-      desc: 'Photorealistic character close-ups, natural skin tones & real-world acoustics',
+      title: 'Cinematic Videos',
+      desc: 'Anamorphic widescreen, dramatic lighting & thrilling high-stakes blockbuster scenes',
       imageUrl: 'https://images.unsplash.com/photo-1485846234645-a62644f84728?auto=format&fit=crop&w=600&q=80',
+      badge: 'Cinematic 4K'
+    },
+    {
+      title: 'Realistic Videos',
+      desc: 'Photorealistic character likeness, natural skin tones, lighting & real-world acoustics',
+      imageUrl: 'https://images.unsplash.com/photo-1534447677768-be436bb09401?auto=format&fit=crop&w=600&q=80',
       badge: 'Photorealistic'
     },
     {
-      title: 'Adventure Movies',
-      desc: 'Anamorphic widescreen, dramatic lighting & thrilling high-stakes chases',
-      imageUrl: 'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?auto=format&fit=crop&w=600&q=80',
-      badge: '16:9 Widescreen'
-    },
-    {
-      title: 'Animated Stories',
-      desc: 'Expressive 3D characters, vibrant cinematic lighting & heartfelt storytelling',
-      imageUrl: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=600&q=80',
-      badge: 'Stylized 3D'
-    },
-    {
       title: 'Cartoon Videos',
-      desc: 'Classic and modern hand-drawn cel-shaded aesthetics with lively motion',
+      desc: 'Classic and modern hand-drawn cel-shaded aesthetics with lively motion & vibrant colors',
       imageUrl: 'https://images.unsplash.com/photo-1579783900882-c0d3dad7b119?auto=format&fit=crop&w=600&q=80',
       badge: '2D Cel Animation'
     },
     {
+      title: 'Adventure Videos',
+      desc: 'Wild expeditions, dense jungles, ancient ruins & heart-pounding epic journeys',
+      imageUrl: 'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?auto=format&fit=crop&w=600&q=80',
+      badge: 'Epic Adventure'
+    },
+    {
       title: 'Superhero Videos',
-      desc: 'Arcane magical powers, glowing cosmic energy & epic hero showdowns',
+      desc: 'Superhuman abilities, glowing cosmic energy, dynamic flight & action showdowns',
       imageUrl: 'https://images.unsplash.com/photo-1607604276583-eef5d076aa5f?auto=format&fit=crop&w=600&q=80',
-      badge: 'VFX / Action'
+      badge: 'VFX Action'
     },
     {
       title: 'Travel Videos',
-      desc: 'Golden hour drone sweeps across mountain ranges, tropical seas & heritage cities',
+      desc: 'Golden hour drone sweeps across mountain ranges, tropical beaches & heritage cities',
       imageUrl: 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=600&q=80',
-      badge: 'Cinematic Travel'
+      badge: 'Scenic 4K'
     },
     {
-      title: 'Educational Videos',
-      desc: 'Clear visual breakdowns, clean scientific concept animations & voiceovers',
-      imageUrl: 'https://images.unsplash.com/photo-1451187580459-43490279c0fa?auto=format&fit=crop&w=600&q=80',
-      badge: 'Explainer Series'
-    },
-    {
-      title: 'Islamic & Inspirational Videos',
-      desc: 'Serene landscapes, architectural heritage, reverent ambient audio & inspiring wisdom',
-      imageUrl: 'https://images.unsplash.com/photo-1564769625905-50e93615e769?auto=format&fit=crop&w=600&q=80',
-      badge: 'Inspirational'
-    },
-    {
-      title: 'Fantasy Stories',
-      desc: 'Mystical forests, legendary creatures, ancient spellbooks & mythical realms',
-      imageUrl: 'https://images.unsplash.com/photo-1534447677768-be436bb09401?auto=format&fit=crop&w=600&q=80',
-      badge: 'Mythic Fantasy'
-    },
-    {
-      title: 'Custom AI Videos',
-      desc: 'Your tailored vision: personalized dialogue, character photos & custom scene cues',
-      imageUrl: 'https://images.unsplash.com/photo-1536440136628-849c177e76a1?auto=format&fit=crop&w=600&q=80',
-      badge: 'Full Custom'
+      title: 'Animated Stories',
+      desc: 'Expressive 3D characters, heartfelt storytelling, fantasy worlds & emotional arcs',
+      imageUrl: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=600&q=80',
+      badge: 'Stylized 3D'
     }
   ];
 
@@ -85,24 +67,24 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
       <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* Top Header Tag */}
         <div className="text-center max-w-3xl mx-auto">
-          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-indigo-950/70 border border-indigo-800/60 text-indigo-300 text-xs font-medium mb-6 backdrop-blur-sm">
+          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-indigo-950/70 border border-indigo-800/60 text-indigo-300 text-xs font-semibold mb-6 backdrop-blur-sm shadow-lg shadow-indigo-950/40">
             <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
-            <span>AI Video Maker</span>
+            <span className="font-bold">AI VIDEO MAKER</span>
             <span className="text-slate-500">·</span>
-            <span>Your Idea. Your Characters. Your AI Video.</span>
+            <span>Your Idea · Your Characters · Your AI Video</span>
           </div>
 
           {/* Main Headline */}
           <h1 className="text-4xl sm:text-5xl lg:text-6xl font-black tracking-tight text-white leading-[1.12] mb-6">
-            Turn Your Imagination Into an{' '}
+            Turn Your Imagination Into{' '}
             <span className="bg-gradient-to-r from-purple-400 via-indigo-300 to-cyan-300 bg-clip-text text-transparent">
-              AI Video
+              AI Videos
             </span>
           </h1>
 
           {/* Supporting text */}
           <p className="text-base sm:text-lg text-slate-300 leading-relaxed mb-8 max-w-2xl mx-auto">
-            Create a personalized video request with your own story, characters, photos, dialogue, and preferred style.
+            Create personalized AI videos with your own ideas, characters, photos, and stories.
           </p>
 
           {/* CTA Buttons */}
@@ -112,7 +94,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
               className="w-full sm:w-auto px-8 py-4 rounded-xl text-base font-bold text-white bg-gradient-to-r from-indigo-600 via-purple-600 to-indigo-700 shadow-xl shadow-indigo-600/30 hover:shadow-indigo-500/50 hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center justify-center gap-2.5 cursor-pointer"
             >
               <Sparkles className="w-5 h-5 text-cyan-300" />
-              <span>Create My AI Video</span>
+              <span>Create Your Video</span>
               <ArrowRight className="w-4 h-4 text-white/80" />
             </button>
 
