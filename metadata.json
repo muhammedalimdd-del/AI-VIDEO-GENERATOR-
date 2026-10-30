@@ -1,0 +1,6 @@
+{
+  "name": "AI Video Request Studio",
+  "description": "Premium platform to request custom AI-generated videos with detailed creative briefs, character references, scene builder, real-time tracking, and email delivery.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
