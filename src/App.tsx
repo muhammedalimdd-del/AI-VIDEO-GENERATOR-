@@ -16,19 +16,22 @@ import { CustomerTracker } from './components/CustomerTracker.tsx';
 import { AdminDashboard } from './components/Admin/AdminDashboard.tsx';
 import { BudgetContactForm } from './components/BudgetContactForm/BudgetContactForm.tsx';
 import { WelcomeScreen } from './components/Auth/WelcomeScreen.tsx';
-import { LoadingScreen } from './components/LoadingScreen.tsx';
 import { MyRequestsView } from './components/Customer/MyRequestsView.tsx';
 import { UserProfileModal } from './components/Customer/UserProfileModal.tsx';
 import { PrivacyModal, TermsModal, DataDeletionModal, ContactModal } from './components/Modals/LegalModals.tsx';
-import { initAuthListener, signOutGoogle, signInWithGoogle } from './services/firebaseAuth.ts';
+import { initAuthListener, signOutGoogle } from './services/firebaseAuth.ts';
 import { UserAccount } from './types/client.ts';
 
 type MainView = 'landing' | 'builder' | 'success' | 'tracker' | 'budget_contact' | 'my_requests';
 
 export default function App() {
-  const [currentUser, setCurrentUser] = useState<UserAccount | null>(null);
-  const [isAuthLoading, setIsAuthLoading] = useState<boolean>(true);
-  const [showWelcomeScreen, setShowWelcomeScreen] = useState<boolean>(false);
+  const [currentUser, setCurrentUser] = useState<UserAccount | null>(() => {
+    try {
+      const cached = localStorage.getItem('aivm_cached_user');
+      if (cached) return JSON.parse(cached);
+    } catch (e) {}
+    return null;
+  });
   const [pendingActionAfterAuth, setPendingActionAfterAuth] = useState<'builder' | null>(null);
   const [isProfileOpen, setIsProfileOpen] = useState<boolean>(false);
 
@@ -46,21 +49,23 @@ export default function App() {
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
   const [isContactOpen, setIsContactOpen] = useState(false);
 
-  // Setup Firebase Auth listener with guaranteed safety timeout
+  // Setup Firebase Auth listener to keep user profile and trial status synced
   useEffect(() => {
-    // Guaranteed safety timeout: Never keep users stuck on loading screen longer than 800ms
-    const safetyTimer = setTimeout(() => {
-      setIsAuthLoading(false);
-    }, 800);
-
     const unsubscribe = initAuthListener((_firebaseUser, profile) => {
-      setCurrentUser(profile);
-      setIsAuthLoading(false);
-      clearTimeout(safetyTimer);
+      if (profile) {
+        setCurrentUser(profile);
+        try {
+          localStorage.setItem('aivm_cached_user', JSON.stringify(profile));
+        } catch (e) {}
+      } else {
+        try {
+          localStorage.removeItem('aivm_cached_user');
+        } catch (e) {}
+        setCurrentUser(null);
+      }
     });
 
     return () => {
-      clearTimeout(safetyTimer);
       unsubscribe();
     };
   }, []);
@@ -157,27 +162,20 @@ export default function App() {
   };
 
   const handleSignOut = async () => {
+    try {
+      localStorage.removeItem('aivm_cached_user');
+      sessionStorage.removeItem('aivm_preview_mode');
+    } catch (e) {}
     await signOutGoogle();
     setCurrentUser(null);
     setCurrentView('landing');
-    setShowWelcomeScreen(false);
   };
 
   const handleGoogleSuccess = (userProfile: UserAccount) => {
+    try {
+      localStorage.setItem('aivm_cached_user', JSON.stringify(userProfile));
+    } catch (e) {}
     setCurrentUser(userProfile);
-    setShowWelcomeScreen(false);
-    if (pendingActionAfterAuth === 'builder') {
-      setPendingActionAfterAuth(null);
-      setCurrentView('builder');
-    } else {
-      setCurrentView('landing');
-    }
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
-
-  const handleExplorePreview = () => {
-    sessionStorage.setItem('aivm_preview_mode', 'true');
-    setShowWelcomeScreen(false);
     if (pendingActionAfterAuth === 'builder') {
       setPendingActionAfterAuth(null);
       setCurrentView('builder');
@@ -193,13 +191,8 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  // Render dedicated temporary loading screen while app initializes session
-  if (isAuthLoading) {
-    return <LoadingScreen onTimeout={() => setIsAuthLoading(false)} />;
-  }
-
   // PROTECTED: Authentication-First Application
-  // Whenever a new visitor opens AI Video Maker, show the Login / Sign-In page first.
+  // Whenever a visitor opens AI Video Maker without an active session, show the Login / Sign-In page first.
   // Never display the Home Page to an unauthenticated visitor.
   if (!currentUser) {
     return (
