@@ -37,13 +37,32 @@ export const MyRequestsView: React.FC<MyRequestsViewProps> = ({
     setIsLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/user/requests?email=${encodeURIComponent(currentUser.email)}&uid=${currentUser.uid}`);
-      if (res.ok) {
-        const data = await res.json();
-        setRequests(data.requests || []);
-      } else {
-        setError('Failed to load your requests. Please try again.');
+      let loadedRequests: VideoRequestClient[] | null = null;
+      try {
+        const res = await fetch(`/api/user/requests?email=${encodeURIComponent(currentUser.email)}&uid=${currentUser.uid}`);
+        const contentType = res.headers.get('content-type') || '';
+        if (res.ok && contentType.includes('application/json')) {
+          const data = await res.json();
+          loadedRequests = data.requests || [];
+        }
+      } catch (netErr) {
+        // Fallback for static hosting
       }
+
+      if (loadedRequests === null) {
+        // Fallback: Read local storage
+        try {
+          const localRequests: VideoRequestClient[] = JSON.parse(localStorage.getItem('studio_local_requests') || '[]');
+          loadedRequests = localRequests.filter(r => 
+            r.customerEmail.toLowerCase() === currentUser.email.toLowerCase() ||
+            (currentUser.uid && (r as any).userId === currentUser.uid)
+          );
+        } catch (e) {
+          loadedRequests = [];
+        }
+      }
+
+      setRequests(loadedRequests || []);
     } catch (e: any) {
       setError(e.message || 'Network error fetching requests.');
     } finally {

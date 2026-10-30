@@ -26,6 +26,8 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onSuccess, onExplo
         setErrorMessage('Sign-in popup was blocked by your browser. Please allow popups for this site and try again.');
       } else if (err.code === 'auth/popup-closed-by-user') {
         setErrorMessage('Sign-in cancelled. Please click "Continue with Google" to complete authentication.');
+      } else if (err.code === 'auth/unauthorized-domain') {
+        setErrorMessage('This domain is not yet authorized in Firebase Console. Add your GitHub Pages domain (' + window.location.hostname + ') to Firebase Console > Authentication > Settings > Authorized domains. You can also explore the studio in demo mode below!');
       } else {
         setErrorMessage(err.message || 'Google authentication failed. Please try again.');
       }

@@ -60,21 +60,37 @@ export const Step4Characters: React.FC<Step4Props> = ({ data, updateData }) => {
     }
 
     try {
-      const formData = new FormData();
-      formData.append('file', file);
+      let photoUrl: string | null = null;
+      try {
+        const formData = new FormData();
+        formData.append('file', file);
 
-      const res = await fetch('/api/upload', {
-        method: 'POST',
-        body: formData
-      });
+        const res = await fetch('/api/upload', {
+          method: 'POST',
+          body: formData
+        });
 
-      if (!res.ok) {
-        throw new Error('Upload failed on server.');
+        const contentType = res.headers.get('content-type') || '';
+        if (res.ok && contentType.includes('application/json')) {
+          const json = await res.json();
+          if (json.fileUrl) photoUrl = json.fileUrl;
+        }
+      } catch (netErr) {
+        // Fallback for static hosting (GitHub Pages)
       }
 
-      const json = await res.json();
+      if (!photoUrl) {
+        // Fallback: Read as base64 Data URL so user can still preview & attach photo
+        photoUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = () => reject(new Error('Failed to read image locally.'));
+          reader.readAsDataURL(file);
+        });
+      }
+
       updateCharacter(charId, {
-        referencePhotoUrl: json.fileUrl,
+        referencePhotoUrl: photoUrl,
         referencePhotoName: file.name
       });
     } catch (e: any) {

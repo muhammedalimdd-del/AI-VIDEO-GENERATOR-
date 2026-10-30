@@ -40,21 +40,50 @@ export const CustomerTracker: React.FC<CustomerTrackerProps> = ({
     setError(null);
 
     try {
-      const res = await fetch('/api/requests/track', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          requestId: idToLook.trim(),
-          emailOrToken: keyToLook.trim()
-        })
-      });
+      let foundRequest: any = null;
 
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'Request not found. Please verify your details.');
+      try {
+        const res = await fetch('/api/requests/track', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            requestId: idToLook.trim(),
+            emailOrToken: keyToLook.trim()
+          })
+        });
+
+        const contentType = res.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+          const data = await res.json();
+          if (res.ok && data.request) {
+            foundRequest = data.request;
+          }
+        }
+      } catch (netErr) {
+        // Fallback for static hosting
       }
 
-      setRequestData(data.request);
+      // If not found from server (e.g. GitHub Pages static deployment), search localStorage
+      if (!foundRequest) {
+        try {
+          const localRequests = JSON.parse(localStorage.getItem('studio_local_requests') || '[]');
+          const match = localRequests.find((r: any) => 
+            r.id.toLowerCase() === idToLook.trim().toLowerCase() &&
+            (r.customerEmail.toLowerCase() === keyToLook.trim().toLowerCase() || r.accessToken === keyToLook.trim())
+          );
+          if (match) {
+            foundRequest = match;
+          }
+        } catch (e) {
+          // ignore
+        }
+      }
+
+      if (!foundRequest) {
+        throw new Error('Request not found. Please verify your Request ID and email.');
+      }
+
+      setRequestData(foundRequest);
     } catch (e: any) {
       setError(e.message || 'Failed to locate request.');
       setRequestData(null);
