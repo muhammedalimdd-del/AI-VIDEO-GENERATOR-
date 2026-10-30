@@ -20,6 +20,7 @@ interface NavbarProps {
   onRequestClick: () => void;
   onTrackClick: () => void;
   onMyRequestsClick: () => void;
+  onProfileClick?: () => void;
   onAdminClick: () => void;
   onContactClick: () => void;
   onBudgetContactClick: () => void;
@@ -33,6 +34,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onRequestClick,
   onTrackClick,
   onMyRequestsClick,
+  onProfileClick,
   onAdminClick,
   onContactClick,
   onBudgetContactClick,
@@ -158,6 +160,19 @@ export const Navbar: React.FC<NavbarProps> = ({
                       </span>
                     </div>
                   </div>
+
+                  {onProfileClick && (
+                    <button
+                      onClick={() => {
+                        setUserDropdownOpen(false);
+                        onProfileClick();
+                      }}
+                      className="w-full p-2.5 rounded-xl hover:bg-slate-800/80 text-left text-slate-200 hover:text-white flex items-center gap-2 font-medium cursor-pointer"
+                    >
+                      <UserIcon className="w-4 h-4 text-cyan-400" />
+                      <span>My Profile</span>
+                    </button>
+                  )}
 
                   <button
                     onClick={() => {

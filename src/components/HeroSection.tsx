@@ -1,14 +1,20 @@
-import React from 'react';
-import { Sparkles, ArrowRight, Film, ShieldCheck, Gift, CreditCard, Video } from 'lucide-react';
+import { Sparkles, ArrowRight, Film, ShieldCheck, Gift, CreditCard, Video, User, Clock } from 'lucide-react';
+import { UserAccount } from '../types/client.ts';
 
 interface HeroSectionProps {
+  currentUser?: UserAccount | null;
   onRequestClick: () => void;
   onExploreStylesClick: () => void;
+  onMyRequestsClick?: () => void;
+  onProfileClick?: () => void;
 }
 
 export const HeroSection: React.FC<HeroSectionProps> = ({
+  currentUser,
   onRequestClick,
-  onExploreStylesClick
+  onExploreStylesClick,
+  onMyRequestsClick,
+  onProfileClick
 }) => {
   const visualCards = [
     {
@@ -67,11 +73,34 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
       <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* Top Header Tag */}
         <div className="text-center max-w-3xl mx-auto">
-          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-indigo-950/70 border border-indigo-800/60 text-indigo-300 text-xs font-semibold mb-6 backdrop-blur-sm shadow-lg shadow-indigo-950/40">
-            <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
-            <span className="font-bold">AI VIDEO MAKER</span>
-            <span className="text-slate-500">·</span>
-            <span>Your Idea · Your Characters · Your AI Video</span>
+          {/* Welcome User Badge */}
+          {currentUser && (
+            <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-slate-900/90 border border-slate-700/80 text-xs text-slate-200 mb-4 shadow-lg shadow-black/40">
+              {currentUser.photoURL ? (
+                <img
+                  src={currentUser.photoURL}
+                  alt={currentUser.displayName || 'User'}
+                  className="w-4 h-4 rounded-full object-cover"
+                />
+              ) : (
+                <User className="w-3.5 h-3.5 text-indigo-400" />
+              )}
+              <span>Welcome back, <strong className="text-white">{currentUser.displayName || 'Creator'}</strong></span>
+              {currentUser.trialStatus === 'eligible' && (
+                <span className="ml-1 px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-300 text-[10px] font-extrabold uppercase border border-emerald-700/50">
+                  🎁 1 Free Trial
+                </span>
+              )}
+            </div>
+          )}
+
+          <div className="flex items-center justify-center gap-2 mb-6">
+            <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-indigo-950/70 border border-indigo-800/60 text-indigo-300 text-xs font-semibold backdrop-blur-sm shadow-lg shadow-indigo-950/40">
+              <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+              <span className="font-bold">AI VIDEO MAKER</span>
+              <span className="text-slate-500">·</span>
+              <span>Your Idea · Your Characters · Your AI Video</span>
+            </div>
           </div>
 
           {/* Main Headline */}
@@ -88,7 +117,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
           </p>
 
           {/* CTA Buttons */}
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-10">
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-6">
             <button
               onClick={onRequestClick}
               className="w-full sm:w-auto px-8 py-4 rounded-xl text-base font-bold text-white bg-gradient-to-r from-indigo-600 via-purple-600 to-indigo-700 shadow-xl shadow-indigo-600/30 hover:shadow-indigo-500/50 hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center justify-center gap-2.5 cursor-pointer"
@@ -105,6 +134,29 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
               <Film className="w-4 h-4 text-indigo-400" />
               <span>Explore Video Styles</span>
             </button>
+          </div>
+
+          {/* Authenticated Fast Links: My Requests & My Profile */}
+          <div className="flex items-center justify-center gap-3 mb-10 text-xs">
+            {onMyRequestsClick && (
+              <button
+                onClick={onMyRequestsClick}
+                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-slate-900/90 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-white transition-colors cursor-pointer"
+              >
+                <Clock className="w-3.5 h-3.5 text-indigo-400" />
+                <span>My Requests</span>
+              </button>
+            )}
+
+            {onProfileClick && (
+              <button
+                onClick={onProfileClick}
+                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-slate-900/90 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-white transition-colors cursor-pointer"
+              >
+                <User className="w-3.5 h-3.5 text-cyan-400" />
+                <span>My Profile</span>
+              </button>
+            )}
           </div>
 
           {/* Trust points */}

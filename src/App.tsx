@@ -18,6 +18,7 @@ import { BudgetContactForm } from './components/BudgetContactForm/BudgetContactF
 import { WelcomeScreen } from './components/Auth/WelcomeScreen.tsx';
 import { LoadingScreen } from './components/LoadingScreen.tsx';
 import { MyRequestsView } from './components/Customer/MyRequestsView.tsx';
+import { UserProfileModal } from './components/Customer/UserProfileModal.tsx';
 import { PrivacyModal, TermsModal, DataDeletionModal, ContactModal } from './components/Modals/LegalModals.tsx';
 import { initAuthListener, signOutGoogle, signInWithGoogle } from './services/firebaseAuth.ts';
 import { UserAccount } from './types/client.ts';
@@ -29,6 +30,7 @@ export default function App() {
   const [isAuthLoading, setIsAuthLoading] = useState<boolean>(true);
   const [showWelcomeScreen, setShowWelcomeScreen] = useState<boolean>(false);
   const [pendingActionAfterAuth, setPendingActionAfterAuth] = useState<'builder' | null>(null);
+  const [isProfileOpen, setIsProfileOpen] = useState<boolean>(false);
 
   const [currentView, setCurrentView] = useState<MainView>('landing');
   const [selectedStyle, setSelectedStyle] = useState<string>('Realistic cinematic');
@@ -191,9 +193,24 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  // Render dedicated temporary loading screen while app initializes
+  // Render dedicated temporary loading screen while app initializes session
   if (isAuthLoading) {
     return <LoadingScreen onTimeout={() => setIsAuthLoading(false)} />;
+  }
+
+  // PROTECTED: Authentication-First Application
+  // Whenever a new visitor opens AI Video Maker, show the Login / Sign-In page first.
+  // Never display the Home Page to an unauthenticated visitor.
+  if (!currentUser) {
+    return (
+      <>
+        <WelcomeScreen onSuccess={handleGoogleSuccess} />
+        {/* Modals available for legal / admin */}
+        <PrivacyModal isOpen={isPrivacyOpen} onClose={() => setIsPrivacyOpen(false)} />
+        <TermsModal isOpen={isTermsOpen} onClose={() => setIsTermsOpen(false)} />
+        {isAdminOpen && <AdminDashboard onClose={() => setIsAdminOpen(false)} />}
+      </>
+    );
   }
 
   return (
@@ -205,6 +222,7 @@ export default function App() {
         onRequestClick={() => handleStartRequest()}
         onTrackClick={() => handleOpenTracker()}
         onMyRequestsClick={handleOpenMyRequests}
+        onProfileClick={() => setIsProfileOpen(true)}
         onAdminClick={() => setIsAdminOpen(true)}
         onContactClick={() => setIsContactOpen(true)}
         onBudgetContactClick={handleOpenBudgetContact}
@@ -217,8 +235,11 @@ export default function App() {
         {currentView === 'landing' && (
           <>
             <HeroSection
+              currentUser={currentUser}
               onRequestClick={() => handleStartRequest()}
               onExploreStylesClick={() => handleNavigate('video-styles')}
+              onMyRequestsClick={handleOpenMyRequests}
+              onProfileClick={() => setIsProfileOpen(true)}
             />
             <HowItWorksSection onRequestClick={() => handleStartRequest()} />
             <StylesGallerySection
@@ -335,15 +356,15 @@ export default function App() {
       <DataDeletionModal isOpen={isDeleteOpen} onClose={() => setIsDeleteOpen(false)} />
       <ContactModal isOpen={isContactOpen} onClose={() => setIsContactOpen(false)} />
 
-      {/* Google Authentication Modal */}
-      {showWelcomeScreen && !currentUser && (
-        <WelcomeScreen
-          onSuccess={handleGoogleSuccess}
-          onExplorePreview={handleExplorePreview}
-          onClose={() => {
-            setShowWelcomeScreen(false);
-            setPendingActionAfterAuth(null);
-          }}
+      {/* User Profile Modal */}
+      {currentUser && (
+        <UserProfileModal
+          isOpen={isProfileOpen}
+          onClose={() => setIsProfileOpen(false)}
+          currentUser={currentUser}
+          onSignOut={handleSignOut}
+          onNewRequest={() => handleStartRequest()}
+          onViewRequests={handleOpenMyRequests}
         />
       )}
     </div>
