@@ -63,7 +63,7 @@ service cloud.firestore {
       allow list: if isAdmin();
       allow create: if isSignedIn() &&
         isValidId(userId) &&
-        request.auth.uid == userId &&
+        (request.auth.uid == userId || isAdmin()) &&
         isValidUser(incoming()) &&
         (!('role' in incoming()) || incoming().role == 'user' || isAdmin());
       allow update: if isSignedIn() &&
@@ -85,7 +85,7 @@ service cloud.firestore {
         (resource.data.userId == request.auth.uid || isAdmin());
       allow create: if isSignedIn() &&
         isValidId(requestId) &&
-        incoming().userId == request.auth.uid &&
+        (incoming().userId == request.auth.uid || isAdmin()) &&
         isValidVideoRequest(incoming());
       allow update: if isSignedIn() &&
         isValidId(requestId) &&

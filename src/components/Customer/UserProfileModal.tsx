@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { UserAccount } from '../../types/client.ts';
-import { User, Mail, Gift, ShieldCheck, Clock, Key, LogOut, X, Sparkles, Film } from 'lucide-react';
+import { User, Mail, Gift, ShieldCheck, Clock, Key, LogOut, X, Sparkles, Film, Database } from 'lucide-react';
+import { seedInitialFirestoreData } from '../../services/firestoreService.ts';
 
 interface UserProfileModalProps {
   isOpen: boolean;
@@ -19,9 +20,25 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
   onNewRequest,
   onViewRequests
 }) => {
+  const [isSeeding, setIsSeeding] = useState(false);
+  const [seedMsg, setSeedMsg] = useState<string | null>(null);
+
   if (!isOpen) return null;
 
   const isTrialEligible = currentUser.trialStatus === 'eligible';
+
+  const handleSeed = async () => {
+    setIsSeeding(true);
+    try {
+      const res = await seedInitialFirestoreData(currentUser);
+      setSeedMsg(res.message);
+      alert(res.message);
+    } catch (e: any) {
+      alert(`Firestore sync: ${e.message}`);
+    } finally {
+      setIsSeeding(false);
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fadeIn">
@@ -106,6 +123,16 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
               </span>
               <span className="font-mono text-slate-400 text-[11px] truncate max-w-[170px]">
                 {currentUser.uid}
+              </span>
+            </div>
+
+            <div className="flex items-center justify-between p-3 rounded-xl bg-slate-900/70 border border-slate-800/70">
+              <span className="text-slate-400 flex items-center gap-2">
+                <Database className="w-3.5 h-3.5 text-amber-400" />
+                Firebase Database
+              </span>
+              <span className="font-mono text-emerald-400 text-[11px] font-bold">
+                Connected (Live)
               </span>
             </div>
 

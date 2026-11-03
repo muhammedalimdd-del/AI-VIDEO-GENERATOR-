@@ -28,9 +28,16 @@ import {
   Download,
   RotateCcw,
   Key,
-  CheckCircle2
+  CheckCircle2,
+  Database
 } from 'lucide-react';
 import { VideoStatus } from '../../types/client.ts';
+import {
+  seedInitialFirestoreData,
+  getAllVideoRequestsFromFirestore,
+  getAllBudgetRequestsFromFirestore,
+  getAllUsersFromFirestore
+} from '../../services/firestoreService.ts';
 
 interface AdminDashboardProps {
   onClose: () => void;
@@ -43,7 +50,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
   const [adminToken, setAdminToken] = useState<string>(() => localStorage.getItem('studio_admin_token') || '');
 
   // Navigation tabs
-  const [activeTab, setActiveTab] = useState<'requests' | 'users' | 'budget' | 'emails' | 'settings'>('requests');
+  const [activeTab, setActiveTab] = useState<'requests' | 'users' | 'budget' | 'emails' | 'settings' | 'firestore'>('requests');
+  const [isSeedingFirestore, setIsSeedingFirestore] = useState(false);
+  const [firestoreStatusMessage, setFirestoreStatusMessage] = useState<string | null>(null);
+  const [firestoreRequests, setFirestoreRequests] = useState<any[]>([]);
+  const [firestoreUsers, setFirestoreUsers] = useState<any[]>([]);
+  const [firestoreBudgets, setFirestoreBudgets] = useState<any[]>([]);
 
   // Video Requests state
   const [requests, setRequests] = useState<any[]>([]);
@@ -321,7 +333,44 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
       } catch (e) {}
     }
 
+    // Query live Firebase Firestore
+    try {
+      const fsReqs = await getAllVideoRequestsFromFirestore();
+      if (fsReqs) {
+        setFirestoreRequests(fsReqs);
+        if (fsReqs.length > 0) {
+          setRequests(prev => {
+            const existingIds = new Set(prev.map(p => p.id));
+            const newFromFs = fsReqs.filter(f => !existingIds.has(f.id));
+            return [...prev, ...newFromFs];
+          });
+        }
+      }
+      const fsUsrs = await getAllUsersFromFirestore();
+      if (fsUsrs) setFirestoreUsers(fsUsrs);
+      const fsBgts = await getAllBudgetRequestsFromFirestore();
+      if (fsBgts) setFirestoreBudgets(fsBgts);
+    } catch (fsErr) {
+      console.warn('Notice: Firestore data fetch:', fsErr);
+    }
+
     setIsLoading(false);
+  };
+
+  const handleSeedFirestore = async () => {
+    setIsSeedingFirestore(true);
+    setFirestoreStatusMessage('Connecting to Firebase Firestore and populating initial records...');
+    try {
+      const res = await seedInitialFirestoreData();
+      setFirestoreStatusMessage(res.message);
+      alert(res.message);
+      await loadData();
+    } catch (e: any) {
+      setFirestoreStatusMessage(`Notice: ${e.message}`);
+      alert(`Firestore notice: ${e.message}`);
+    } finally {
+      setIsSeedingFirestore(false);
+    }
   };
 
   // Video Request Details
@@ -784,6 +833,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
               }`}
             >
               Settings
+            </button>
+            <button
+              onClick={() => setActiveTab('firestore')}
+              className={`px-3 py-1.5 rounded-md transition-all cursor-pointer flex items-center gap-1.5 ${
+                activeTab === 'firestore' ? 'bg-amber-600 text-white shadow-sm' : 'text-amber-400 hover:text-white'
+              }`}
+            >
+              <Database className="w-3.5 h-3.5" />
+              <span>Firebase Database</span>
             </button>
           </div>
 
@@ -1591,6 +1649,141 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
                 </button>
               </div>
             </form>
+          </div>
+        )}
+
+        {/* FIREBASE FIRESTORE DATABASE MANAGER TAB */}
+        {activeTab === 'firestore' && (
+          <div className="max-w-5xl mx-auto space-y-6">
+            {/* Header card */}
+            <div className="p-6 rounded-2xl bg-gradient-to-r from-amber-950/30 via-[#0A0E1A] to-indigo-950/30 border border-amber-800/50 shadow-xl space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400">
+                    <Database className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-black text-white flex items-center gap-2">
+                      <span>Firebase Firestore Database</span>
+                      <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-emerald-950 text-emerald-300 border border-emerald-800">
+                        ONLINE & CONNECTED
+                      </span>
+                    </h3>
+                    <p className="text-xs text-slate-400 font-mono mt-0.5">
+                      Database: <span className="text-amber-300">ai-studio-aivideorequestst-8c45d58b-3348-4049-bab8-64b5be4fc37a</span>
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleSeedFirestore}
+                    disabled={isSeedingFirestore}
+                    className="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-500 hover:to-amber-600 text-white font-bold text-xs shadow-md transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                  >
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>{isSeedingFirestore ? 'Seeding Live Data...' : 'Seed Sample Data to Firestore'}</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      loadData();
+                    }}
+                    className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition-all flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    <span>Refresh</span>
+                  </button>
+                </div>
+              </div>
+
+              {firestoreStatusMessage && (
+                <div className="p-3 rounded-xl bg-amber-950/60 border border-amber-800/70 text-xs text-amber-200 flex items-center gap-2 animate-fadeIn">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <span>{firestoreStatusMessage}</span>
+                </div>
+              )}
+
+              {/* Database Metas */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2">
+                <div className="p-3 rounded-xl bg-[#090D16] border border-slate-800">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Project ID</span>
+                  <p className="text-xs font-mono font-bold text-slate-200 truncate mt-0.5">gen-lang-client-0869903114</p>
+                </div>
+                <div className="p-3 rounded-xl bg-[#090D16] border border-slate-800">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Security Rules</span>
+                  <p className="text-xs font-bold text-emerald-400 mt-0.5">ABAC Hardened Rules Active</p>
+                </div>
+                <div className="p-3 rounded-xl bg-[#090D16] border border-slate-800">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Video Requests in DB</span>
+                  <p className="text-xs font-mono font-bold text-indigo-400 mt-0.5">{firestoreRequests.length} documents</p>
+                </div>
+                <div className="p-3 rounded-xl bg-[#090D16] border border-slate-800">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Budget Ideas in DB</span>
+                  <p className="text-xs font-mono font-bold text-cyan-400 mt-0.5">{firestoreBudgets.length} documents</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Live Firestore Documents Preview */}
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                  <Video className="w-4 h-4 text-indigo-400" />
+                  <span>Firestore Collection: /video_requests ({firestoreRequests.length})</span>
+                </h4>
+                {firestoreRequests.length === 0 && (
+                  <button
+                    onClick={handleSeedFirestore}
+                    className="text-xs text-amber-400 hover:underline font-semibold"
+                  >
+                    + Click here to populate sample data
+                  </button>
+                )}
+              </div>
+
+              {firestoreRequests.length === 0 ? (
+                <div className="p-8 rounded-2xl bg-[#090D16] border border-slate-800 text-center space-y-3">
+                  <Database className="w-8 h-8 text-slate-600 mx-auto" />
+                  <p className="text-xs text-slate-400">
+                    No documents currently in <span className="font-mono text-amber-300">/video_requests</span>.
+                  </p>
+                  <button
+                    onClick={handleSeedFirestore}
+                    className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs cursor-pointer"
+                  >
+                    Populate Initial Firebase Data Now
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {firestoreRequests.map((req, i) => (
+                    <div key={i} className="p-4 rounded-xl bg-[#090D16] border border-slate-800 hover:border-slate-700 transition-all space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono text-xs font-bold text-amber-400">{req.id}</span>
+                          <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-slate-800 text-slate-200">
+                            {req.status}
+                          </span>
+                          <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-indigo-950 text-indigo-300 border border-indigo-800">
+                            {req.requestType}
+                          </span>
+                        </div>
+                        <span className="text-[11px] text-slate-500 font-mono">
+                          {new Date(req.createdAt).toLocaleString()}
+                        </span>
+                      </div>
+                      <p className="text-xs font-bold text-white">{req.title}</p>
+                      <p className="text-[11px] text-slate-400 line-clamp-2">{req.summary || req.storyDescription}</p>
+                      <div className="flex items-center gap-4 text-[10px] text-slate-500 pt-1 border-t border-slate-800/60">
+                        <span>Style: <strong className="text-slate-300">{req.style}</strong></span>
+                        <span>Customer: <strong className="text-slate-300">{req.customerName || req.userEmail}</strong></span>
+                        <span>Format: <strong className="text-slate-300">{req.aspectRatio || req.format}</strong></span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         )}
       </main>

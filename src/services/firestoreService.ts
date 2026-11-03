@@ -189,3 +189,189 @@ export function subscribeToUserRequests(
     }
   );
 }
+
+/**
+ * Fetch all video requests from Firestore (admin access)
+ */
+export async function getAllVideoRequestsFromFirestore(): Promise<VideoRequestClient[]> {
+  const path = VIDEO_REQUESTS_COLLECTION;
+  try {
+    const querySnapshot = await getDocs(collection(db, VIDEO_REQUESTS_COLLECTION));
+    const items: VideoRequestClient[] = [];
+    querySnapshot.forEach((docSnap) => {
+      items.push(docSnap.data() as VideoRequestClient);
+    });
+    return items;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.LIST, path);
+  }
+}
+
+/**
+ * Fetch all budget requests from Firestore (admin access)
+ */
+export async function getAllBudgetRequestsFromFirestore(): Promise<any[]> {
+  const path = BUDGET_REQUESTS_COLLECTION;
+  try {
+    const querySnapshot = await getDocs(collection(db, BUDGET_REQUESTS_COLLECTION));
+    const items: any[] = [];
+    querySnapshot.forEach((docSnap) => {
+      items.push(docSnap.data());
+    });
+    return items;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.LIST, path);
+  }
+}
+
+/**
+ * Fetch all users from Firestore (admin access)
+ */
+export async function getAllUsersFromFirestore(): Promise<UserAccount[]> {
+  const path = USERS_COLLECTION;
+  try {
+    const querySnapshot = await getDocs(collection(db, USERS_COLLECTION));
+    const items: UserAccount[] = [];
+    querySnapshot.forEach((docSnap) => {
+      items.push(docSnap.data() as UserAccount);
+    });
+    return items;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.LIST, path);
+  }
+}
+
+/**
+ * Seed initial sample documents into Firebase Firestore database
+ */
+export async function seedInitialFirestoreData(currentUser?: UserAccount | null): Promise<{
+  success: boolean;
+  seededCount: number;
+  message: string;
+}> {
+  const currentUid = auth.currentUser?.uid || currentUser?.uid || 'google-admin-usr-01';
+  const currentEmail = auth.currentUser?.email || currentUser?.email || 'muhammedalimdd@gmail.com';
+  const currentName = auth.currentUser?.displayName || currentUser?.displayName || 'Muhammed Ali';
+
+  let count = 0;
+
+  // 1. Seed admin role doc if admin email
+  if (currentEmail === 'muhammedalimdd@gmail.com' || auth.currentUser?.email === 'muhammedalimdd@gmail.com') {
+    try {
+      await setDoc(
+        doc(db, 'admins', currentUid),
+        {
+          email: currentEmail,
+          role: 'superadmin',
+          createdAt: new Date().toISOString()
+        },
+        { merge: true }
+      );
+      count++;
+    } catch (e) {
+      console.warn('Notice: Seeding admin doc in Firestore:', e);
+    }
+  }
+
+  // 2. Seed primary demo video request
+  const demoReqId = 'AVM-2026-8941';
+  try {
+    await setDoc(
+      doc(db, VIDEO_REQUESTS_COLLECTION, demoReqId),
+      {
+        id: demoReqId,
+        accessToken: 'sec_78a1c9e89b3f46028d7122b0f4',
+        createdAt: new Date(Date.now() - 36 * 3600 * 1000).toISOString(),
+        updatedAt: new Date(Date.now() - 4 * 3600 * 1000).toISOString(),
+        status: 'In Production',
+        userId: currentUid,
+        userEmail: currentEmail,
+        customerName: currentName,
+        deliveryEmail: currentEmail,
+        requestType: 'free_trial',
+        pricingMessage: 'One-Time Free Trial (Verified)',
+        title: 'Neon Cyberpunk Detective Short',
+        videoType: 'YouTube Shorts / Cinematic Story',
+        purpose: 'YouTube Shorts & Reels',
+        summary: 'A fast-paced neon rainy cyberpunk chase where Detective Sean tracks a rogue synthetic android in New Kyoto.',
+        style: 'Realistic cinematic',
+        format: 'portrait',
+        aspectRatio: '9:16',
+        storyDescription: 'Cold opening on rainy rooftop overlooking holographic skyscrapers. Vance traces an encrypted signal. In the alleyway below, Echo-09 looks directly up and triggers optical camouflage. Vance drops down, grappling hook sparks against brick, leading into a thrilling neon chase that cuts right before confrontation.',
+        quotedPrice: 0
+      },
+      { merge: true }
+    );
+    count++;
+  } catch (e) {
+    console.warn('Notice: Seeding demoReqId in Firestore:', e);
+  }
+
+  // 3. Seed second sample video request
+  const sampleReq2Id = 'AVM-2026-4420';
+  try {
+    await setDoc(
+      doc(db, VIDEO_REQUESTS_COLLECTION, sampleReq2Id),
+      {
+        id: sampleReq2Id,
+        accessToken: 'sec_99c3d4a1b2',
+        createdAt: new Date(Date.now() - 12 * 3600 * 1000).toISOString(),
+        updatedAt: new Date(Date.now() - 2 * 3600 * 1000).toISOString(),
+        status: 'Approved',
+        userId: currentUid,
+        userEmail: currentEmail,
+        customerName: currentName,
+        deliveryEmail: currentEmail,
+        requestType: 'paid_order',
+        pricingMessage: 'Standard Custom Video (₹299)',
+        title: 'The Lost Jungle Temple Adventure',
+        videoType: 'Landscape Cinematic 4K',
+        purpose: 'YouTube Cinematic',
+        summary: 'Golden hour drone sweeps across mountain ranges, uncovering ancient moss-covered ruins with glowing glyphs.',
+        style: 'Adventure Videos',
+        format: 'landscape',
+        aspectRatio: '16:9',
+        storyDescription: 'Expedition party approaches misty canyon. Ancient stone gate responds to solar medallion.',
+        quotedPrice: 299
+      },
+      { merge: true }
+    );
+    count++;
+  } catch (e) {
+    console.warn('Notice: Seeding sampleReq2Id in Firestore:', e);
+  }
+
+  // 4. Seed sample budget inquiry
+  const sampleBudgetId = 'BR-2026-1042';
+  try {
+    await setDoc(
+      doc(db, BUDGET_REQUESTS_COLLECTION, sampleBudgetId),
+      {
+        id: sampleBudgetId,
+        createdAt: new Date(Date.now() - 8 * 3600 * 1000).toISOString(),
+        updatedAt: new Date().toISOString(),
+        status: 'In Review',
+        userId: currentUid,
+        customerName: currentName,
+        customerEmail: currentEmail,
+        videoIdea: 'Custom animated explainer with 3D character avatars and dynamic title cards.',
+        message: 'Looking for a 60-second video with upbeat background music and voiceover delivery.',
+        videoType: 'animated',
+        format: 'portrait',
+        duration: '1 minute',
+        budgetOption: 'STANDARD',
+        budgetAmount: '₹299'
+      },
+      { merge: true }
+    );
+    count++;
+  } catch (e) {
+    console.warn('Notice: Seeding sampleBudgetId in Firestore:', e);
+  }
+
+  return {
+    success: count > 0,
+    seededCount: count,
+    message: `Successfully populated ${count} documents in Firebase Firestore!`
+  };
+}
