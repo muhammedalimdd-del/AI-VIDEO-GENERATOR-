@@ -9,6 +9,7 @@ import { Step6DurationQuality } from './Step6DurationQuality.tsx';
 import { Step7CustomerDelivery } from './Step7CustomerDelivery.tsx';
 import { Step8ReviewSubmit } from './Step8ReviewSubmit.tsx';
 import { ArrowLeft, ArrowRight, RotateCcw, AlertCircle } from 'lucide-react';
+import { saveVideoRequestToFirestore } from '../../services/firestoreService.ts';
 
 interface RequestBuilderProps {
   initialStyle?: string;
@@ -312,6 +313,13 @@ export const RequestBuilder: React.FC<RequestBuilderProps> = ({
         }
 
         result = { request: fallbackRequest };
+      }
+
+      // Persist to Firebase Firestore database
+      try {
+        await saveVideoRequestToFirestore(result.request);
+      } catch (fsErr) {
+        console.warn('Notice: Background Firestore video request save:', fsErr);
       }
 
       localStorage.removeItem(STORAGE_KEY);

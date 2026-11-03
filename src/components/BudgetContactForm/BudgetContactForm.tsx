@@ -3,6 +3,7 @@ import {
   Sparkles, Send, CheckCircle2, AlertCircle, Upload, X, Image as ImageIcon,
   Check, Smartphone, Monitor, Square, Clock, ShieldCheck, ArrowRight, HelpCircle
 } from 'lucide-react';
+import { saveBudgetRequestToFirestore } from '../../services/firestoreService.ts';
 
 interface BudgetContactFormProps {
   onBackToHome?: () => void;
@@ -228,6 +229,13 @@ export const BudgetContactForm: React.FC<BudgetContactFormProps> = ({ onBackToHo
         } catch (e) {
           // ignore
         }
+      }
+
+      // Persist to Firebase Firestore database
+      try {
+        await saveBudgetRequestToFirestore(budgetRequestData);
+      } catch (fsErr) {
+        console.warn('Notice: Background Firestore budget request save:', fsErr);
       }
 
       setSubmittedData(budgetRequestData);

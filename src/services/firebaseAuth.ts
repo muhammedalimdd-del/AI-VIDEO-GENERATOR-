@@ -1,24 +1,13 @@
-import { initializeApp, getApps, getApp } from 'firebase/app';
 import {
-  getAuth,
   signInWithPopup,
   GoogleAuthProvider,
   onAuthStateChanged,
   signOut,
   User
 } from 'firebase/auth';
-import firebaseConfig from '../../firebase-applet-config.json';
+import { auth } from './firebase.ts';
 import { UserAccount, TrialStatus } from '../types/client.ts';
-
-// Initialize Firebase App singleton with resilience
-let app: any = null;
-let auth: any = null;
-try {
-  app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
-  auth = getAuth(app);
-} catch (e) {
-  console.warn('Firebase initialization notice:', e);
-}
+import { saveUserToFirestore, getUserFromFirestore } from './firestoreService.ts';
 export { auth };
 
 const provider = new GoogleAuthProvider();
@@ -38,6 +27,7 @@ export const initAuthListener = (
   try {
     return onAuthStateChanged(auth, async (firebaseUser) => {
     if (firebaseUser) {
+      let resolvedProfile: UserAccount | null = null;
       try {
         // Sync with backend to get persisted database user & trial status
         const res = await fetch('/api/auth/google-sync', {
@@ -53,24 +43,41 @@ export const initAuthListener = (
 
         if (res.ok) {
           const data = await res.json();
-          onUserChanged(firebaseUser, data.user);
-          return;
+          resolvedProfile = data.user;
         }
       } catch (err) {
         console.error('Failed to sync authenticated Google user with backend:', err);
       }
 
-      // Fallback local profile if backend sync had a network error
-      const fallbackProfile: UserAccount = {
-        uid: firebaseUser.uid,
-        email: firebaseUser.email || '',
-        displayName: firebaseUser.displayName || 'Google User',
-        photoURL: firebaseUser.photoURL || '',
-        createdAt: new Date().toISOString(),
-        lastLoginAt: new Date().toISOString(),
-        trialStatus: 'eligible'
-      };
-      onUserChanged(firebaseUser, fallbackProfile);
+      if (!resolvedProfile) {
+        // Check Firestore first
+        try {
+          const fromFirestore = await getUserFromFirestore(firebaseUser.uid);
+          if (fromFirestore) resolvedProfile = fromFirestore;
+        } catch (e) {
+          // ignore
+        }
+      }
+
+      if (!resolvedProfile) {
+        // Fallback local profile if backend sync had a network error
+        resolvedProfile = {
+          uid: firebaseUser.uid,
+          email: firebaseUser.email || '',
+          displayName: firebaseUser.displayName || 'Google User',
+          photoURL: firebaseUser.photoURL || '',
+          createdAt: new Date().toISOString(),
+          lastLoginAt: new Date().toISOString(),
+          trialStatus: 'eligible'
+        };
+      }
+
+      // Synchronize with Firestore database
+      saveUserToFirestore(resolvedProfile).catch((err) => {
+        console.warn('Notice: Background Firestore user save:', err);
+      });
+
+      onUserChanged(firebaseUser, resolvedProfile);
     } else {
       cachedAccessToken = null;
       onUserChanged(null, null);
@@ -120,6 +127,13 @@ export const signInWithGoogle = async (): Promise<{
         lastLoginAt: new Date().toISOString(),
         trialStatus: 'eligible'
       };
+    }
+
+    // Save to Firestore database
+    try {
+      await saveUserToFirestore(profile);
+    } catch (fsErr) {
+      console.warn('Notice: Firestore user write during signInWithGoogle:', fsErr);
     }
 
     return {

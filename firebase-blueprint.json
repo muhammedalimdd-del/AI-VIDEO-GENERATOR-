@@ -1,0 +1,102 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile with authentication and trial eligibility",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "email": { "type": "string", "maxLength": 256 },
+        "displayName": { "type": "string", "maxLength": 128 },
+        "photoURL": { "type": "string", "maxLength": 1024 },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "lastLoginAt": { "type": "string", "maxLength": 64 },
+        "trialStatus": { "type": "string", "enum": ["eligible", "used", "claimed"] },
+        "role": { "type": "string", "enum": ["user", "admin"] }
+      },
+      "required": ["uid", "email", "createdAt", "trialStatus"]
+    },
+    "VideoRequest": {
+      "title": "VideoRequest",
+      "description": "Creative brief and custom video request",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "accessToken": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 },
+        "status": {
+          "type": "string",
+          "enum": ["Pending Review", "Under Review", "Script Approved", "In Production", "Rendering", "Ready for Delivery", "Delivered", "Cancelled"]
+        },
+        "userId": { "type": "string", "maxLength": 128 },
+        "userEmail": { "type": "string", "maxLength": 256 },
+        "customerName": { "type": "string", "maxLength": 128 },
+        "deliveryEmail": { "type": "string", "maxLength": 256 },
+        "requestType": { "type": "string", "enum": ["free_trial", "paid_order"] },
+        "pricingMessage": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 256 },
+        "videoType": { "type": "string", "maxLength": 128 },
+        "purpose": { "type": "string", "maxLength": 128 },
+        "summary": { "type": "string", "maxLength": 2048 },
+        "style": { "type": "string", "maxLength": 128 },
+        "format": { "type": "string", "enum": ["portrait", "landscape", "square"] },
+        "aspectRatio": { "type": "string", "maxLength": 16 },
+        "storyDescription": { "type": "string", "maxLength": 5000 },
+        "quotedPrice": { "type": "number" }
+      },
+      "required": ["id", "createdAt", "status", "userId", "userEmail", "title", "requestType"]
+    },
+    "BudgetRequest": {
+      "title": "BudgetRequest",
+      "description": "Direct contact and custom video budget inquiry",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 },
+        "status": { "type": "string", "enum": ["New", "In Review", "Contacted", "Closed"] },
+        "userId": { "type": "string", "maxLength": 128 },
+        "customerName": { "type": "string", "maxLength": 128 },
+        "customerEmail": { "type": "string", "maxLength": 256 },
+        "videoIdea": { "type": "string", "maxLength": 4096 },
+        "message": { "type": "string", "maxLength": 4096 },
+        "videoType": { "type": "string", "maxLength": 128 },
+        "format": { "type": "string", "maxLength": 32 },
+        "duration": { "type": "string", "maxLength": 32 },
+        "budgetOption": { "type": "string", "maxLength": 64 },
+        "budgetAmount": { "type": "string", "maxLength": 32 }
+      },
+      "required": ["id", "createdAt", "status", "customerName", "customerEmail", "videoIdea"]
+    },
+    "Admin": {
+      "title": "Admin",
+      "description": "Administrator account role document",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "maxLength": 256 },
+        "role": { "type": "string", "enum": ["admin", "superadmin"] },
+        "createdAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["email", "role"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profile collection containing account information and trial eligibility"
+    },
+    "/video_requests/{requestId}": {
+      "schema": "VideoRequest",
+      "description": "Customer video creation requests submitted to the studio"
+    },
+    "/budget_requests/{budgetRequestId}": {
+      "schema": "BudgetRequest",
+      "description": "Contact and budget estimate inquiries from potential clients"
+    },
+    "/admins/{adminId}": {
+      "schema": "Admin",
+      "description": "List of system administrator UIDs permitted to manage all requests"
+    }
+  }
+}

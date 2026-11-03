@@ -15,6 +15,7 @@ import {
   RefreshCw,
   ArrowLeft
 } from 'lucide-react';
+import { getVideoRequestsForUser, subscribeToUserRequests } from '../../services/firestoreService.ts';
 
 interface MyRequestsViewProps {
   currentUser: UserAccount;
@@ -38,19 +39,37 @@ export const MyRequestsView: React.FC<MyRequestsViewProps> = ({
     setError(null);
     try {
       let loadedRequests: VideoRequestClient[] | null = null;
-      try {
-        const res = await fetch(`/api/user/requests?email=${encodeURIComponent(currentUser.email)}&uid=${currentUser.uid}`);
-        const contentType = res.headers.get('content-type') || '';
-        if (res.ok && contentType.includes('application/json')) {
-          const data = await res.json();
-          loadedRequests = data.requests || [];
+
+      // 1. First attempt to load from Firestore database
+      if (currentUser.uid) {
+        try {
+          const fsItems = await getVideoRequestsForUser(currentUser.uid);
+          if (fsItems && fsItems.length > 0) {
+            loadedRequests = fsItems;
+          }
+        } catch (fsErr) {
+          console.warn('Notice: Reading from Firestore:', fsErr);
         }
-      } catch (netErr) {
-        // Fallback for static hosting
       }
 
-      if (loadedRequests === null) {
-        // Fallback: Read local storage
+      // 2. Fetch from backend API
+      if (!loadedRequests || loadedRequests.length === 0) {
+        try {
+          const res = await fetch(`/api/user/requests?email=${encodeURIComponent(currentUser.email)}&uid=${currentUser.uid}`);
+          const contentType = res.headers.get('content-type') || '';
+          if (res.ok && contentType.includes('application/json')) {
+            const data = await res.json();
+            if (data.requests && data.requests.length > 0) {
+              loadedRequests = data.requests;
+            }
+          }
+        } catch (netErr) {
+          // Fallback for static hosting
+        }
+      }
+
+      // 3. Fallback: Read local storage
+      if (loadedRequests === null || loadedRequests.length === 0) {
         try {
           const localRequests: VideoRequestClient[] = JSON.parse(localStorage.getItem('studio_local_requests') || '[]');
           loadedRequests = localRequests.filter(r => 
@@ -72,6 +91,23 @@ export const MyRequestsView: React.FC<MyRequestsViewProps> = ({
 
   useEffect(() => {
     fetchUserRequests();
+
+    // Setup real-time listener if user is authenticated with Firestore
+    if (currentUser.uid) {
+      try {
+        const unsubscribe = subscribeToUserRequests(currentUser.uid, (firestoreRequests) => {
+          if (firestoreRequests && firestoreRequests.length > 0) {
+            setRequests(firestoreRequests);
+            setIsLoading(false);
+          }
+        });
+        return () => {
+          unsubscribe();
+        };
+      } catch (subErr) {
+        console.warn('Notice: Realtime Firestore subscription:', subErr);
+      }
+    }
   }, [currentUser]);
 
   const handleQuoteDecision = async (requestId: string, action: 'accept' | 'decline') => {

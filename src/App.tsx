@@ -15,6 +15,7 @@ import { SuccessScreen } from './components/SuccessScreen.tsx';
 import { CustomerTracker } from './components/CustomerTracker.tsx';
 import { AdminDashboard } from './components/Admin/AdminDashboard.tsx';
 import { BudgetContactForm } from './components/BudgetContactForm/BudgetContactForm.tsx';
+import { LoadingScreen } from './components/LoadingScreen.tsx';
 import { WelcomeScreen } from './components/Auth/WelcomeScreen.tsx';
 import { MyRequestsView } from './components/Customer/MyRequestsView.tsx';
 import { UserProfileModal } from './components/Customer/UserProfileModal.tsx';
@@ -31,6 +32,13 @@ export default function App() {
       if (cached) return JSON.parse(cached);
     } catch (e) {}
     return null;
+  });
+  const [isAuthInitializing, setIsAuthInitializing] = useState<boolean>(() => {
+    // If cached user exists, don't show loading screen
+    try {
+      if (localStorage.getItem('aivm_cached_user')) return false;
+    } catch (e) {}
+    return true;
   });
   const [pendingActionAfterAuth, setPendingActionAfterAuth] = useState<'builder' | null>(null);
   const [isProfileOpen, setIsProfileOpen] = useState<boolean>(false);
@@ -51,7 +59,14 @@ export default function App() {
 
   // Setup Firebase Auth listener to keep user profile and trial status synced
   useEffect(() => {
+    // Safety timer to prevent any lingering loading state
+    const safetyTimer = setTimeout(() => {
+      setIsAuthInitializing(false);
+    }, 450);
+
     const unsubscribe = initAuthListener((_firebaseUser, profile) => {
+      setIsAuthInitializing(false);
+      clearTimeout(safetyTimer);
       if (profile) {
         setCurrentUser(profile);
         try {
@@ -66,6 +81,7 @@ export default function App() {
     });
 
     return () => {
+      clearTimeout(safetyTimer);
       unsubscribe();
     };
   }, []);
@@ -86,18 +102,15 @@ export default function App() {
 
       if (budget === 'true') {
         setCurrentView('budget_contact');
-        setShowWelcomeScreen(false);
       }
 
       if (myReq === 'true') {
         setCurrentView('my_requests');
-        setShowWelcomeScreen(false);
       }
 
       if (id) {
         setTrackParams({ id, token: token || '' });
         setCurrentView('tracker');
-        setShowWelcomeScreen(false);
       }
     } catch (e) {
       // ignore
@@ -105,7 +118,6 @@ export default function App() {
   }, []);
 
   const handleNavigate = (sectionId: string) => {
-    setShowWelcomeScreen(false);
     if (currentView !== 'landing') {
       setCurrentView('landing');
       setTimeout(() => {
@@ -122,13 +134,11 @@ export default function App() {
     if (styleName) {
       setSelectedStyle(styleName);
     }
-    // If not signed in, prompt Google sign-in
+    // If not signed in, set pending action
     if (!currentUser) {
       setPendingActionAfterAuth('builder');
-      setShowWelcomeScreen(true);
       return;
     }
-    setShowWelcomeScreen(false);
     setCurrentView('builder');
     setTimeout(() => {
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -136,13 +146,11 @@ export default function App() {
   };
 
   const handleOpenBudgetContact = () => {
-    setShowWelcomeScreen(false);
     setCurrentView('budget_contact');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleOpenTracker = (id?: string, token?: string) => {
-    setShowWelcomeScreen(false);
     if (id) {
       setTrackParams({ id, token: token || '' });
     }
@@ -151,12 +159,6 @@ export default function App() {
   };
 
   const handleOpenMyRequests = () => {
-    if (!currentUser) {
-      setPendingActionAfterAuth(null);
-      setShowWelcomeScreen(true);
-      return;
-    }
-    setShowWelcomeScreen(false);
     setCurrentView('my_requests');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -191,7 +193,12 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  // PROTECTED: Authentication-First Application
+  // 1. Initializing state: render LoadingScreen while checking auth (max 450ms safety timeout)
+  if (isAuthInitializing && !currentUser) {
+    return <LoadingScreen onTimeout={() => setIsAuthInitializing(false)} />;
+  }
+
+  // 2. PROTECTED: Authentication-First Application
   // Whenever a visitor opens AI Video Maker without an active session, show the Login / Sign-In page first.
   // Never display the Home Page to an unauthenticated visitor.
   if (!currentUser) {
@@ -219,7 +226,7 @@ export default function App() {
         onAdminClick={() => setIsAdminOpen(true)}
         onContactClick={() => setIsContactOpen(true)}
         onBudgetContactClick={handleOpenBudgetContact}
-        onSignInClick={() => setShowWelcomeScreen(true)}
+        onSignInClick={() => {}}
         onSignOutClick={handleSignOut}
       />
 

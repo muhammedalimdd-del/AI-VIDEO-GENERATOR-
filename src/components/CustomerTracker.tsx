@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Search, Clock, CheckCircle2, AlertCircle, Send, Video, Download, ArrowLeft, MessageSquare, ExternalLink, ShieldCheck } from 'lucide-react';
+import { getVideoRequestById } from '../services/firestoreService.ts';
 
 interface CustomerTrackerProps {
   initialRequestId?: string;
@@ -63,7 +64,19 @@ export const CustomerTracker: React.FC<CustomerTrackerProps> = ({
         // Fallback for static hosting
       }
 
-      // If not found from server (e.g. GitHub Pages static deployment), search localStorage
+      // If not found from server, check Firestore database
+      if (!foundRequest) {
+        try {
+          const fsDoc = await getVideoRequestById(idToLook.trim());
+          if (fsDoc) {
+            foundRequest = fsDoc;
+          }
+        } catch (fsErr) {
+          console.warn('Notice: Firestore lookup error:', fsErr);
+        }
+      }
+
+      // If not found from server or Firestore, search localStorage
       if (!foundRequest) {
         try {
           const localRequests = JSON.parse(localStorage.getItem('studio_local_requests') || '[]');
