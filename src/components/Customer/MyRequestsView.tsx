@@ -39,46 +39,69 @@ export const MyRequestsView: React.FC<MyRequestsViewProps> = ({
     setIsLoading(true);
     setError(null);
     try {
-      let loadedRequests: VideoRequestClient[] | null = null;
+      const requestMap = new Map<string, VideoRequestClient>();
 
-      // 1. First attempt to load from Firestore database
+      // 1. Fetch from backend API strictly for this user's UID / username
+      try {
+        const queryParams = new URLSearchParams({
+          uid: currentUser.uid || '',
+          username: currentUser.username || '',
+          email: currentUser.email || ''
+        });
+        const result = await safeFetchJson<{ requests?: VideoRequestClient[] }>(
+          `/api/user/requests?${queryParams.toString()}`
+        );
+        if (result.ok && Array.isArray(result.data?.requests)) {
+          for (const item of result.data.requests) {
+            requestMap.set(item.id, item);
+          }
+        }
+      } catch (netErr) {
+        // Fallback for offline/static hosting
+      }
+
+      // 2. Also load from Firestore database strictly for currentUser.uid
       if (currentUser.uid) {
         try {
           const fsItems = await getVideoRequestsForUser(currentUser.uid);
-          if (fsItems && fsItems.length > 0) {
-            loadedRequests = fsItems;
+          if (Array.isArray(fsItems)) {
+            for (const item of fsItems) {
+              if (!requestMap.has(item.id)) {
+                requestMap.set(item.id, {
+                  ...item,
+                  characters: Array.isArray(item.characters) ? item.characters : [],
+                  format: item.format || 'portrait',
+                  aspectRatio: item.aspectRatio || '9:16',
+                  duration: item.duration || '30 seconds'
+                });
+              }
+            }
           }
         } catch (fsErr) {
           console.warn('Notice: Reading from Firestore:', fsErr);
         }
       }
 
-      // 2. Fetch from backend API
-      if (!loadedRequests || loadedRequests.length === 0) {
+      // 3. Fallback: Read local storage strictly matching currentUser.uid
+      if (requestMap.size === 0) {
         try {
-          const result = await safeFetchJson<{ requests?: VideoRequestClient[] }>(`/api/user/requests?email=${encodeURIComponent(currentUser.email)}&uid=${currentUser.uid}`);
-          if (result.ok && result.data?.requests && result.data.requests.length > 0) {
-            loadedRequests = result.data.requests;
-          }
-        } catch (netErr) {
-          // Fallback for static hosting
-        }
-      }
-
-      // 3. Fallback: Read local storage
-      if (loadedRequests === null || loadedRequests.length === 0) {
-        try {
-          const localRequests: VideoRequestClient[] = JSON.parse(localStorage.getItem('studio_local_requests') || '[]');
-          loadedRequests = localRequests.filter(r => 
-            r.customerEmail.toLowerCase() === currentUser.email.toLowerCase() ||
-            (currentUser.uid && (r as any).userId === currentUser.uid)
+          const localRequests: VideoRequestClient[] = JSON.parse(
+            localStorage.getItem('studio_local_requests') || '[]'
           );
+          for (const r of localRequests) {
+            if (currentUser.uid && (r as any).userId === currentUser.uid) {
+              requestMap.set(r.id, r);
+            }
+          }
         } catch (e) {
-          loadedRequests = [];
+          // ignore
         }
       }
 
-      setRequests(loadedRequests || []);
+      const merged = Array.from(requestMap.values()).sort(
+        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      );
+      setRequests(merged);
     } catch (e: any) {
       setError(e.message || 'Network error fetching requests.');
     } finally {
@@ -94,7 +117,24 @@ export const MyRequestsView: React.FC<MyRequestsViewProps> = ({
       try {
         const unsubscribe = subscribeToUserRequests(currentUser.uid, (firestoreRequests) => {
           if (firestoreRequests && firestoreRequests.length > 0) {
-            setRequests(firestoreRequests);
+            setRequests((prev) => {
+              const map = new Map<string, VideoRequestClient>();
+              for (const item of prev) map.set(item.id, item);
+              for (const fsItem of firestoreRequests) {
+                if (!map.has(fsItem.id)) {
+                  map.set(fsItem.id, {
+                    ...fsItem,
+                    characters: Array.isArray(fsItem.characters) ? fsItem.characters : [],
+                    format: fsItem.format || 'portrait',
+                    aspectRatio: fsItem.aspectRatio || '9:16',
+                    duration: fsItem.duration || '30 seconds'
+                  });
+                }
+              }
+              return Array.from(map.values()).sort(
+                (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+              );
+            });
             setIsLoading(false);
           }
         });

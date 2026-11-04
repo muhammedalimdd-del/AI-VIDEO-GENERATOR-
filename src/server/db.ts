@@ -364,11 +364,12 @@ class Database {
     deviceId: string;
     registeredUserId: string | null;
   } {
-    const matched = this.getDeviceForClient(deviceId, fingerprintHash);
+    // Only match by explicit per-browser deviceId if provided, never force-assign another person's username via shared fingerprint
+    const matched = deviceId ? this.getDeviceById(deviceId) : undefined;
     if (matched) {
       return {
         isRegistered: true,
-        lockedUsername: matched.registeredUsername,
+        lockedUsername: null,
         deviceId: matched.deviceId,
         registeredUserId: matched.registeredUserId
       };
@@ -382,85 +383,48 @@ class Database {
   }
 
   public registerDeviceAccount(params: {
+    fullName?: string;
+    displayName?: string;
+    email?: string;
+    contactEmail?: string;
     username: string;
     password: string;
-    deviceId: string;
-    fingerprintHash: string;
+    confirmPassword?: string;
+    deviceId?: string;
+    fingerprintHash?: string;
     ipSubnet?: string;
     userAgent?: string;
-    contactEmail?: string;
     passwordHash?: string;
     passwordSalt?: string;
     uid?: string;
   }): { user: UserAccount; device: DeviceRegistration; session: AuthSession } {
-    const username = params.username.trim();
+    const username = (params.username || '').trim();
+    const fullName = (params.fullName || params.displayName || '').trim();
+    const rawEmail = (params.email || params.contactEmail || '').trim().toLowerCase();
+
+    if (!fullName) {
+      throw new Error('Please enter your Full Name.');
+    }
+    const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+    if (!rawEmail || !emailRegex.test(rawEmail)) {
+      throw new Error('Please enter a valid Email Address.');
+    }
     if (!username || username.length < 3) {
       throw new Error('Username must be at least 3 characters long.');
     }
-    if (!/^[a-zA-Z0-9_-]+$/.test(username)) {
-      throw new Error('Username may only contain letters, numbers, underscores, and hyphens.');
+    if (!/^[a-zA-Z0-9_.-]+$/.test(username)) {
+      throw new Error('Username may only contain letters, numbers, underscores, dots, and hyphens.');
     }
     if (!params.password || params.password.length < 4) {
       throw new Error('Password must be at least 4 characters long.');
     }
+    if (params.confirmPassword !== undefined && params.password !== params.confirmPassword) {
+      throw new Error('Passwords do not match. Please confirm your password.');
+    }
 
+    // Strict Server-Side Check: Every username must be unique
     const existingUser = this.getUserByUsername(username);
-    const existingDevice = this.getDeviceForClient(params.deviceId, params.fingerprintHash);
-
-    // If this device is already registered to this exact username and password matches, sign them in seamlessly
-    if (
-      existingUser &&
-      existingDevice &&
-      existingDevice.registeredUsername.toLowerCase() === username.toLowerCase()
-    ) {
-      if (verifyPassword(params.password, existingUser.passwordHash, existingUser.passwordSalt)) {
-        const loginRes = this.loginDeviceAccount({
-          username,
-          password: params.password,
-          deviceId: params.deviceId,
-          fingerprintHash: params.fingerprintHash,
-          ipSubnet: params.ipSubnet
-        });
-        return {
-          user: loginRes.user,
-          device: existingDevice,
-          session: loginRes.session
-        };
-      } else {
-        throw new Error(
-          `This device is already registered to account "${existingDevice.registeredUsername}". Invalid password — please sign in with your existing password.`
-        );
-      }
-    }
-
-    // 1. Strict Server-Side Check: Is this device already registered to a different username?
-    if (existingDevice) {
-      throw new Error(
-        `This device is already permanently registered to user "${existingDevice.registeredUsername}". Each device is locked to only ONE account.`
-      );
-    }
-
-    // 2. Strict Server-Side Check: Is this username already taken?
     if (existingUser) {
-      // If existingUser has no device yet or matches this deviceId and password matches, link and sign in
-      if (
-        (!existingUser.deviceId || existingUser.deviceId === params.deviceId) &&
-        verifyPassword(params.password, existingUser.passwordHash, existingUser.passwordSalt)
-      ) {
-        const loginRes = this.loginDeviceAccount({
-          username,
-          password: params.password,
-          deviceId: params.deviceId,
-          fingerprintHash: params.fingerprintHash,
-          ipSubnet: params.ipSubnet
-        });
-        const linkedDevice = this.getDeviceForClient(params.deviceId, params.fingerprintHash)!;
-        return {
-          user: loginRes.user,
-          device: linkedDevice,
-          session: loginRes.session
-        };
-      }
       throw new Error('This username is already taken. Please choose another username.');
     }
 
@@ -472,21 +436,19 @@ class Database {
         ? { hash: params.passwordHash, salt: params.passwordSalt }
         : hashPassword(params.password);
 
-    const email = params.contactEmail?.trim() || `${username.toLowerCase()}@aivideomaker.local`;
-
     const newUser: UserAccount = {
       uid: userId,
       username,
-      displayName: username,
-      email,
+      displayName: fullName,
+      email: rawEmail,
       passwordHash: hash,
       passwordSalt: salt,
       deviceId,
-      deviceFingerprint: params.fingerprintHash,
+      deviceFingerprint: params.fingerprintHash || deviceId,
       createdAt: now,
       lastLoginAt: now,
       trialStatus: 'eligible',
-      role: username.toLowerCase() === 'admin' || email === defaultOwnerEmail ? 'admin' : 'user'
+      role: username.toLowerCase() === 'admin' ? 'admin' : 'user'
     };
 
     const newDevice: DeviceRegistration = {
@@ -498,7 +460,7 @@ class Database {
       userAgent: params.userAgent || '',
       firstRegisteredAt: now,
       lastSeenAt: now,
-      registrationLockActive: true
+      registrationLockActive: false
     };
 
     // Create session token (valid 30 days)
@@ -531,17 +493,9 @@ class Database {
     fingerprintHash?: string;
     ipSubnet?: string;
   }): { user: UserAccount; session: AuthSession } {
-    const username = params.username.trim();
+    const username = (params.username || '').trim();
     if (!username || !params.password) {
       throw new Error('Invalid username or password. Please try again.');
-    }
-
-    // Strict Device Verification: Check device lock first
-    const matchedDevice = this.getDeviceForClient(params.deviceId, params.fingerprintHash);
-    if (matchedDevice && matchedDevice.registeredUsername.toLowerCase() !== username.toLowerCase()) {
-      throw new Error(
-        `Device locked: This device is permanently registered to account "${matchedDevice.registeredUsername}". You cannot sign in with a different account on this device.`
-      );
     }
 
     const user = this.getUserByUsername(username);
@@ -563,40 +517,6 @@ class Database {
     const isValid = verifyPassword(params.password, user.passwordHash, user.passwordSalt);
     if (!isValid) {
       throw new Error('Invalid username or password. Please try again.');
-    }
-
-    // Check if user account is locked to a different device
-    if (
-      user.deviceId &&
-      params.deviceId &&
-      user.deviceId !== params.deviceId &&
-      user.deviceFingerprint &&
-      params.fingerprintHash &&
-      user.deviceFingerprint !== params.fingerprintHash
-    ) {
-      throw new Error(
-        `Account "${user.username}" is permanently locked to another device.`
-      );
-    }
-
-    // Update or create device lock record if not yet recorded
-    if (matchedDevice) {
-      matchedDevice.lastSeenAt = new Date().toISOString();
-    } else if (params.deviceId) {
-      const devId = params.deviceId;
-      user.deviceId = user.deviceId || devId;
-      user.deviceFingerprint = user.deviceFingerprint || params.fingerprintHash || devId;
-      this.data.devices.push({
-        deviceId: devId,
-        fingerprintHash: params.fingerprintHash || devId,
-        registeredUserId: user.uid,
-        registeredUsername: user.username,
-        ipSubnet: params.ipSubnet || '0.0.0.0',
-        userAgent: '',
-        firstRegisteredAt: user.createdAt,
-        lastSeenAt: new Date().toISOString(),
-        registrationLockActive: true
-      });
     }
 
     const now = new Date().toISOString();
@@ -642,6 +562,12 @@ class Database {
       this.data.users.push(existingUser);
     } else {
       existingUser.lastLoginAt = new Date().toISOString();
+      if (incomingUser.displayName) {
+        existingUser.displayName = incomingUser.displayName;
+      }
+      if (incomingUser.email) {
+        existingUser.email = incomingUser.email;
+      }
       if (incomingUser.passwordHash && !existingUser.passwordHash) {
         existingUser.passwordHash = incomingUser.passwordHash;
         existingUser.passwordSalt = incomingUser.passwordSalt;
@@ -655,7 +581,7 @@ class Database {
     }
 
     if (params.device) {
-      const existingDev = this.getDeviceForClient(params.device.deviceId, params.device.fingerprintHash);
+      const existingDev = this.getDeviceById(params.device.deviceId);
       if (!existingDev) {
         this.data.devices.push(params.device);
       } else {
@@ -719,7 +645,7 @@ class Database {
 
     if (user) {
       // Update existing user profile
-      user.uid = payload.uid; // sync Google UID
+      user.uid = payload.uid;
       user.email = normalizedEmail;
       if (payload.displayName) user.displayName = payload.displayName;
       if (payload.photoURL) user.photoURL = payload.photoURL;
@@ -790,12 +716,36 @@ class Database {
     );
   }
 
-  public getUserRequests(emailOrUid: string): VideoRequest[] {
-    const term = emailOrUid.trim().toLowerCase();
+  public getUserRequests(queryOrFilter: string | { uid?: string; username?: string; email?: string }): VideoRequest[] {
+    if (typeof queryOrFilter === 'object' && queryOrFilter !== null) {
+      const uid = (queryOrFilter.uid || '').trim();
+      const username = (queryOrFilter.username || '').trim().toLowerCase();
+      const email = (queryOrFilter.email || '').trim().toLowerCase();
+
+      return this.data.requests
+        .filter((r) => {
+          if (uid) {
+            if (r.userId === uid) return true;
+            if (username && r.customerUsername && r.customerUsername.toLowerCase() === username) return true;
+            return false;
+          }
+          if (username && r.customerUsername && r.customerUsername.toLowerCase() === username) {
+            return true;
+          }
+          if (email && (r.userEmail?.toLowerCase() === email || r.customerEmail.toLowerCase() === email)) {
+            return true;
+          }
+          return false;
+        })
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    }
+
+    const term = queryOrFilter.trim().toLowerCase();
     return this.data.requests
       .filter(
         (r) =>
-          r.userId === emailOrUid ||
+          r.userId === queryOrFilter.trim() ||
+          (r.customerUsername && r.customerUsername.toLowerCase() === term) ||
           r.userEmail?.toLowerCase() === term ||
           r.customerEmail.toLowerCase() === term
       )

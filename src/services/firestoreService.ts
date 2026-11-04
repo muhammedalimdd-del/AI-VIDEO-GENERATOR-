@@ -234,7 +234,9 @@ export async function saveVideoRequestToFirestore(
       status: request.status,
       userId: request.userId || auth.currentUser?.uid || '',
       userEmail: request.userEmail || auth.currentUser?.email || request.customerEmail,
+      customerUsername: request.customerUsername || '',
       customerName: request.customerName,
+      customerEmail: request.customerEmail,
       deliveryEmail: request.customerEmail,
       requestType: request.requestType === 'free_trial' ? 'free_trial' : 'paid_order',
       pricingMessage: request.pricingMessage || 'Custom Video Request',
@@ -243,8 +245,10 @@ export async function saveVideoRequestToFirestore(
       purpose: request.purpose || 'General',
       summary: (request.summary || '').slice(0, 2048),
       style: request.style,
-      format: request.format,
-      aspectRatio: request.aspectRatio,
+      format: request.format || 'portrait',
+      aspectRatio: request.aspectRatio || '9:16',
+      duration: request.duration || '30 seconds',
+      characters: Array.isArray(request.characters) ? request.characters : [],
       storyDescription: (request.storyDescription || '').slice(0, 5000),
       quotedPrice: request.quote?.amount || 0
     };

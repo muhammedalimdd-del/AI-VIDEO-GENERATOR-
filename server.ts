@@ -133,12 +133,15 @@ app.get('/api/device/status', handleDeviceStatus);
 const handleRegisterDevice = (req: express.Request, res: express.Response) => {
   try {
     const {
+      fullName,
+      displayName,
+      email,
+      contactEmail,
       username,
       password,
       confirmPassword,
       deviceId,
       fingerprintHash,
-      contactEmail,
       passwordHash,
       passwordSalt,
       uid
@@ -155,13 +158,16 @@ const handleRegisterDevice = (req: express.Request, res: express.Response) => {
     const userAgent = req.headers['user-agent'] || '';
 
     const result = db.registerDeviceAccount({
+      fullName: fullName || displayName || username,
+      email: email || contactEmail,
+      contactEmail: contactEmail || email,
       username,
       password,
+      confirmPassword,
       deviceId,
       fingerprintHash,
       ipSubnet: String(clientIp).split(',')[0].trim(),
       userAgent: String(userAgent),
-      contactEmail,
       passwordHash,
       passwordSalt,
       uid
@@ -172,7 +178,7 @@ const handleRegisterDevice = (req: express.Request, res: express.Response) => {
       user: result.user,
       token: result.session.token,
       deviceId: result.device.deviceId,
-      message: 'Account created and device locked successfully.'
+      message: 'Account created successfully.'
     });
   } catch (err: any) {
     const isConflict =
@@ -180,7 +186,7 @@ const handleRegisterDevice = (req: express.Request, res: express.Response) => {
       (err.message.includes('already permanently registered') ||
         err.message.includes('already registered') ||
         err.message.includes('already taken'));
-    res.status(isConflict ? 403 : 400).json({
+    res.status(isConflict ? 409 : 400).json({
       error: err.message || 'Failed to create account.'
     });
   }
@@ -549,16 +555,17 @@ app.post('/api/requests', async (req, res) => {
   }
 });
 
-// 7. Get Customer Requests (My Requests)
+// 7. Get Customer Requests (My Requests - strictly isolated per user account)
 app.get('/api/user/requests', (req, res) => {
   const email = (req.query.email as string) || (req.headers['x-user-email'] as string);
   const uid = (req.query.uid as string) || (req.headers['x-user-uid'] as string);
+  const username = (req.query.username as string) || (req.headers['x-username'] as string);
 
-  if (!email && !uid) {
-    return res.status(400).json({ error: 'User email or UID is required' });
+  if (!email && !uid && !username) {
+    return res.status(400).json({ error: 'User UID, username, or email is required' });
   }
 
-  const requests = db.getUserRequests(email || uid);
+  const requests = db.getUserRequests({ uid, username, email });
   res.json({
     success: true,
     requests
