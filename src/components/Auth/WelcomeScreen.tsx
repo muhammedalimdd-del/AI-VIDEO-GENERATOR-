@@ -1,37 +1,176 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { AiVideoCameraLogo } from '../Brand/AiVideoCameraLogo.tsx';
-import { signInWithGoogle } from '../../services/firebaseAuth.ts';
-import { Sparkles, ShieldCheck, Film, Gift, AlertCircle, Play, CheckCircle2, Lock } from 'lucide-react';
+import {
+  checkDeviceRegistrationStatus,
+  registerDeviceAccount,
+  loginDeviceAccount,
+  DeviceStatusResponse
+} from '../../services/deviceIdentity.ts';
+import {
+  Sparkles,
+  ShieldCheck,
+  Film,
+  Gift,
+  AlertCircle,
+  Lock,
+  User,
+  KeyRound,
+  Eye,
+  EyeOff,
+  CheckCircle2,
+  Cpu,
+  Info,
+  ArrowRight,
+  ArrowLeft
+} from 'lucide-react';
 
 interface WelcomeScreenProps {
   onSuccess: (user: any) => void;
 }
 
+type AuthMode = 'welcome' | 'register' | 'login';
+
 export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onSuccess }) => {
+  const [deviceStatus, setDeviceStatus] = useState<DeviceStatusResponse>({
+    isRegistered: false,
+    lockedUsername: null,
+    deviceId: ''
+  });
+  const [isCheckingDevice, setIsCheckingDevice] = useState(true);
+
+  // Auth flow states
+  const [authMode, setAuthMode] = useState<AuthMode>('welcome');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+
+  // Status & loading
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [showDevicePolicyModal, setShowDevicePolicyModal] = useState(false);
 
-  const handleGoogleSignIn = async () => {
-    setIsLoading(true);
+  // Check device registration on mount
+  useEffect(() => {
+    let isMounted = true;
+    checkDeviceRegistrationStatus()
+      .then((status) => {
+        if (!isMounted) return;
+        setDeviceStatus(status);
+        if (status.lockedUsername) {
+          setUsername(status.lockedUsername);
+        }
+      })
+      .catch((err) => {
+        console.warn('Notice: Device registration check error:', err);
+      })
+      .finally(() => {
+        if (isMounted) setIsCheckingDevice(false);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  // When clicking the prominent "User Sign In" button
+  const handleUserSignInClick = () => {
     setErrorMessage(null);
+    setSuccessMessage(null);
+    if (deviceStatus.isRegistered) {
+      // Returning registered device: Open Login Screen directly
+      if (deviceStatus.lockedUsername) {
+        setUsername(deviceStatus.lockedUsername);
+      }
+      setAuthMode('login');
+    } else {
+      // Fresh unregistered device: Open Account Creation Screen
+      setAuthMode('register');
+    }
+  };
+
+  // Handle First-Time Account Registration
+  const handleCreateAccount = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMessage(null);
+
+    const trimmedUser = username.trim();
+    if (!trimmedUser) {
+      setErrorMessage('Please enter a username.');
+      return;
+    }
+    if (trimmedUser.length < 3) {
+      setErrorMessage('Username must be at least 3 characters.');
+      return;
+    }
+    if (!/^[a-zA-Z0-9_-]+$/.test(trimmedUser)) {
+      setErrorMessage('Username may only contain letters, numbers, underscores, and hyphens.');
+    }
+    if (!password) {
+      setErrorMessage('Please create a password.');
+      return;
+    }
+    if (password.length < 4) {
+      setErrorMessage('Password must be at least 4 characters long.');
+      return;
+    }
+    if (password !== confirmPassword) {
+      setErrorMessage('Passwords do not match. Please verify and try again.');
+      return;
+    }
+
+    setIsLoading(true);
     try {
-      const result = await signInWithGoogle();
-      if (result && result.profile) {
-        onSuccess(result.profile);
-      }
+      const result = await registerDeviceAccount({
+        username: trimmedUser,
+        password,
+        confirmPassword
+      });
+
+      setSuccessMessage('Account created successfully! Device permanently locked.');
+      setDeviceStatus({
+        isRegistered: true,
+        lockedUsername: trimmedUser,
+        deviceId: result.user.deviceId || deviceStatus.deviceId
+      });
+
+      setTimeout(() => {
+        onSuccess(result.user);
+      }, 400);
     } catch (err: any) {
-      console.error('Google sign-in error:', err);
-      if (err.code === 'auth/popup-blocked') {
-        setErrorMessage('Sign-in popup was blocked by your browser. Please allow popups for this site and try again.');
-      } else if (err.code === 'auth/popup-closed-by-user') {
-        setErrorMessage('Sign-in cancelled. Please click "Continue with Google" to complete authentication.');
-      } else if (err.code === 'auth/unauthorized-domain') {
-        setErrorMessage(
-          `Domain (${window.location.hostname}) is not yet authorized in Firebase Console. Add it to Firebase Console > Authentication > Settings > Authorized domains.`
-        );
-      } else {
-        setErrorMessage(err.message || 'Google authentication failed. Please try again.');
-      }
+      setErrorMessage(err.message || 'Failed to create account. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Handle Returning User Login
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMessage(null);
+
+    const trimmedUser = username.trim();
+    if (!trimmedUser || !password) {
+      setErrorMessage('Invalid username or password. Please try again.');
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const result = await loginDeviceAccount({
+        username: trimmedUser,
+        password
+      });
+
+      setSuccessMessage('Login successful! Redirecting to studio...');
+      setTimeout(() => {
+        onSuccess(result.user);
+      }, 350);
+    } catch (err: any) {
+      // Required exact error copy when credentials fail
+      setErrorMessage('Invalid username or password. Please try again.');
     } finally {
       setIsLoading(false);
     }
@@ -81,7 +220,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onSuccess }) => {
           <div className="space-y-4">
             <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-indigo-950/80 border border-indigo-700/60 text-xs font-semibold text-indigo-300 shadow-lg shadow-indigo-950/50">
               <Sparkles className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />
-              <span>Next-Generation AI Video Creation Platform</span>
+              <span>Next-Generation AI Video Creation Studio</span>
             </div>
 
             {/* Exact Required Main Heading */}
@@ -98,7 +237,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onSuccess }) => {
             </p>
           </div>
 
-          {/* Cinematic Mini Gallery Preview Grid */}
+          {/* Mini Gallery Showcase Preview Grid */}
           <div className="pt-2">
             <p className="text-[11px] uppercase font-bold tracking-wider text-slate-400 mb-3 flex items-center justify-center lg:justify-start gap-1.5">
               <Film className="w-3.5 h-3.5 text-indigo-400" />
@@ -135,17 +274,17 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onSuccess }) => {
               </div>
               <div>
                 <h4 className="text-xs font-bold text-white">1-Time Free Trial</h4>
-                <p className="text-[10px] text-slate-400 mt-0.5">Test studio with your real Google account</p>
+                <p className="text-[10px] text-slate-400 mt-0.5">Free sample video request for new registered accounts</p>
               </div>
             </div>
 
             <div className="p-3 rounded-xl bg-[#090D18]/90 border border-slate-800/80 flex items-start gap-2.5">
               <div className="w-7 h-7 rounded-lg bg-indigo-950/80 border border-indigo-700/60 flex items-center justify-center shrink-0 mt-0.5">
-                <Film className="w-3.5 h-3.5 text-indigo-400" />
+                <Cpu className="w-3.5 h-3.5 text-indigo-400" />
               </div>
               <div>
-                <h4 className="text-xs font-bold text-white">Based on Video</h4>
-                <p className="text-[10px] text-slate-400 mt-0.5">Custom quote based on your scene brief</p>
+                <h4 className="text-xs font-bold text-white">Device-Locked</h4>
+                <p className="text-[10px] text-slate-400 mt-0.5">Strict 1 account per device policy enforced on server</p>
               </div>
             </div>
 
@@ -154,105 +293,399 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onSuccess }) => {
                 <ShieldCheck className="w-3.5 h-3.5 text-purple-400" />
               </div>
               <div>
-                <h4 className="text-xs font-bold text-white">Email Delivery</h4>
-                <p className="text-[10px] text-slate-400 mt-0.5">Completed video sent to your Google inbox</p>
+                <h4 className="text-xs font-bold text-white">Salted Passwords</h4>
+                <p className="text-[10px] text-slate-400 mt-0.5">Encrypted with secure cryptographic scrypt hashing</p>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Right Column: Google Sign-in Card (5 cols) */}
+        {/* Right Column: Custom Username/Password Device-Locked Card (5 cols) */}
         <div className="lg:col-span-5">
-          <div className="bg-[#090E1B]/95 backdrop-blur-2xl border border-slate-800/90 rounded-3xl p-6 sm:p-9 shadow-2xl shadow-purple-950/40 relative overflow-hidden">
+          <div className="bg-[#090E1B]/95 backdrop-blur-2xl border border-slate-800/90 rounded-3xl p-6 sm:p-8 shadow-2xl shadow-purple-950/40 relative overflow-hidden">
             {/* Top accent light */}
             <div className="absolute top-0 right-0 w-48 h-48 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
 
             <div className="space-y-6 relative z-10">
-              {/* Header inside card */}
-              <div>
-                <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-indigo-950/60 border border-indigo-800/60 text-[11px] font-bold text-indigo-300 uppercase tracking-wider mb-2">
-                  <Lock className="w-3 h-3 text-cyan-400" />
-                  <span>Secure Studio Access</span>
-                </div>
-                <h2 className="text-2xl sm:text-3xl font-black text-white tracking-tight">
-                  Sign In
-                </h2>
-                {/* Required Notice */}
-                <p className="text-xs sm:text-sm text-slate-300 mt-2 leading-relaxed">
-                  Sign in to access your personal AI Video Maker studio.
-                </p>
-              </div>
+              {/* SECTION 1: WELCOME SCREEN (INITIAL STATE) */}
+              {authMode === 'welcome' && (
+                <div className="space-y-6 animate-fadeIn">
+                  <div>
+                    <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-indigo-950/60 border border-indigo-800/60 text-[11px] font-bold text-indigo-300 uppercase tracking-wider mb-2">
+                      <Lock className="w-3 h-3 text-cyan-400" />
+                      <span>Device-Locked Studio Access</span>
+                    </div>
+                    {/* Exact Required Heading */}
+                    <h2 className="text-2xl sm:text-3xl font-black text-white tracking-tight">
+                      Welcome to AI Video Maker
+                    </h2>
+                    <p className="text-xs sm:text-sm text-slate-300 mt-2 leading-relaxed">
+                      Sign in to access your personal AI Video Maker studio.
+                    </p>
+                  </div>
 
-              {/* Free Trial Highlight Box */}
-              <div className="p-4 rounded-2xl bg-gradient-to-r from-emerald-950/60 via-indigo-950/50 to-slate-900 border border-emerald-700/40 space-y-1.5">
-                <div className="flex items-center gap-2 text-emerald-400 font-bold text-xs">
-                  <Gift className="w-4 h-4 text-emerald-400 shrink-0" />
-                  <span>New Customer Free Trial Available</span>
-                </div>
-                <p className="text-xs text-slate-300 leading-relaxed">
-                  First-time eligible Google accounts can request a free sample video. Verified Google delivery protects your project.
-                </p>
-              </div>
+                  {/* Device Status Notification Pill */}
+                  <div className="p-4 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-slate-300 flex items-center gap-2">
+                        <Cpu className="w-3.5 h-3.5 text-indigo-400" />
+                        Device Policy:
+                      </span>
+                      {isCheckingDevice ? (
+                        <span className="text-[11px] text-slate-400 flex items-center gap-1">
+                          <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
+                          Checking device...
+                        </span>
+                      ) : deviceStatus.isRegistered ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-950 text-amber-300 border border-amber-700/60">
+                          <Lock className="w-2.5 h-2.5" /> Registered Device
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-950 text-emerald-300 border border-emerald-700/60">
+                          <CheckCircle2 className="w-2.5 h-2.5" /> Fresh Device Ready
+                        </span>
+                      )}
+                    </div>
 
-              {errorMessage && (
-                <div className="p-3.5 rounded-xl bg-rose-950/70 border border-rose-800 text-rose-200 text-xs flex items-start gap-2.5 animate-fadeIn">
-                  <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
-                  <span className="leading-relaxed">{errorMessage}</span>
+                    <p className="text-xs text-slate-400 leading-relaxed">
+                      {deviceStatus.isRegistered ? (
+                        <>
+                          This device is registered to account{' '}
+                          <span className="text-white font-bold font-mono">
+                            {deviceStatus.lockedUsername}
+                          </span>
+                          . Clicking Sign In will open the login screen.
+                        </>
+                      ) : (
+                        <>
+                          Each physical device is permanently associated with{' '}
+                          <span className="text-indigo-300 font-bold">only ONE</span> account.
+                          Clicking Sign In will let you create your username & password.
+                        </>
+                      )}
+                    </p>
+                  </div>
+
+                  {/* Free Trial Highlight Box */}
+                  <div className="p-4 rounded-2xl bg-gradient-to-r from-emerald-950/60 via-indigo-950/50 to-slate-900 border border-emerald-700/40 space-y-1.5">
+                    <div className="flex items-center gap-2 text-emerald-400 font-bold text-xs">
+                      <Gift className="w-4 h-4 text-emerald-400 shrink-0" />
+                      <span>One-Time Free Trial System</span>
+                    </div>
+                    <p className="text-xs text-slate-300 leading-relaxed">
+                      Every new registered device account is eligible for 1 free trial video request.
+                      Subsequent video requests are quoted based on the video brief.
+                    </p>
+                  </div>
+
+                  {/* Prominent Exact Button: "User Sign In" */}
+                  <div className="space-y-3 pt-2">
+                    <button
+                      type="button"
+                      onClick={handleUserSignInClick}
+                      disabled={isCheckingDevice}
+                      className="w-full py-4 px-5 rounded-2xl bg-gradient-to-r from-indigo-600 via-purple-600 to-cyan-600 hover:from-indigo-500 hover:via-purple-500 hover:to-cyan-500 text-white font-bold text-base flex items-center justify-center gap-3 shadow-xl shadow-indigo-600/30 hover:shadow-indigo-600/50 hover:scale-[1.01] active:scale-[0.99] transition-all cursor-pointer disabled:opacity-70 group"
+                    >
+                      <User className="w-5 h-5 text-cyan-200 group-hover:scale-110 transition-transform" />
+                      <span>User Sign In</span>
+                      <ArrowRight className="w-4 h-4 text-cyan-300 group-hover:translate-x-1 transition-transform" />
+                    </button>
+
+                    <div className="flex items-center justify-center gap-2 text-[11px] text-slate-400 pt-1">
+                      <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>Hardware Fingerprint Enforced · No Multi-Accounts Allowed</span>
+                    </div>
+                  </div>
                 </div>
               )}
 
-              {/* Official Google Sign-In Button */}
-              <div className="space-y-3 pt-1">
+              {/* SECTION 2: FIRST-TIME ACCOUNT CREATION SCREEN */}
+              {authMode === 'register' && (
+                <form onSubmit={handleCreateAccount} className="space-y-4 animate-fadeIn">
+                  <div className="flex items-center justify-between pb-1">
+                    <button
+                      type="button"
+                      onClick={() => setAuthMode('welcome')}
+                      className="inline-flex items-center gap-1 text-xs text-slate-400 hover:text-white transition-colors cursor-pointer"
+                    >
+                      <ArrowLeft className="w-3.5 h-3.5" />
+                      <span>Back</span>
+                    </button>
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 bg-emerald-950/80 border border-emerald-700/60 px-2 py-0.5 rounded-full">
+                      Step 1 · Create Account
+                    </span>
+                  </div>
+
+                  <div>
+                    <h2 className="text-2xl font-black text-white tracking-tight">
+                      Create Your Account
+                    </h2>
+                    <p className="text-xs text-slate-300 mt-1 leading-relaxed">
+                      Choose a username and password. This device will be permanently locked to this account.
+                    </p>
+                  </div>
+
+                  {/* Device Lock Warning Alert */}
+                  <div className="p-3 rounded-xl bg-amber-950/40 border border-amber-800/60 text-amber-200 text-xs flex items-start gap-2.5">
+                    <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                    <span className="leading-relaxed">
+                      <strong>One-Account Rule:</strong> Once created, you cannot register another account on this device. Please remember your credentials.
+                    </span>
+                  </div>
+
+                  {errorMessage && (
+                    <div className="p-3 rounded-xl bg-rose-950/70 border border-rose-800 text-rose-200 text-xs flex items-start gap-2.5 animate-fadeIn">
+                      <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                      <span className="leading-relaxed">{errorMessage}</span>
+                    </div>
+                  )}
+
+                  {successMessage && (
+                    <div className="p-3 rounded-xl bg-emerald-950/70 border border-emerald-800 text-emerald-200 text-xs flex items-center gap-2.5 animate-fadeIn">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                      <span>{successMessage}</span>
+                    </div>
+                  )}
+
+                  {/* Field: Username */}
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-bold text-slate-200">
+                      Username <span className="text-rose-400">*</span>
+                    </label>
+                    <div className="relative">
+                      <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+                        <User className="w-4 h-4" />
+                      </div>
+                      <input
+                        type="text"
+                        required
+                        value={username}
+                        onChange={(e) => setUsername(e.target.value)}
+                        placeholder="e.g. creative_director"
+                        className="w-full pl-10 pr-4 py-3 rounded-xl bg-slate-900/90 border border-slate-700 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-white placeholder-slate-500 text-sm outline-none transition-all"
+                      />
+                    </div>
+                    <p className="text-[10px] text-slate-400">
+                      Must be unique. This username cannot be changed later.
+                    </p>
+                  </div>
+
+                  {/* Field: Create Your Password */}
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-bold text-slate-200">
+                      Create Your Password <span className="text-rose-400">*</span>
+                    </label>
+                    <div className="relative">
+                      <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+                        <KeyRound className="w-4 h-4" />
+                      </div>
+                      <input
+                        type={showPassword ? 'text' : 'password'}
+                        required
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        placeholder="Enter custom password"
+                        className="w-full pl-10 pr-10 py-3 rounded-xl bg-slate-900/90 border border-slate-700 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-white placeholder-slate-500 text-sm outline-none transition-all"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-200 cursor-pointer"
+                      >
+                        {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Field: Confirm Password */}
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-bold text-slate-200">
+                      Confirm Password <span className="text-rose-400">*</span>
+                    </label>
+                    <div className="relative">
+                      <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+                        <Lock className="w-4 h-4" />
+                      </div>
+                      <input
+                        type={showConfirmPassword ? 'text' : 'password'}
+                        required
+                        value={confirmPassword}
+                        onChange={(e) => setConfirmPassword(e.target.value)}
+                        placeholder="Re-enter password to confirm"
+                        className="w-full pl-10 pr-10 py-3 rounded-xl bg-slate-900/90 border border-slate-700 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-white placeholder-slate-500 text-sm outline-none transition-all"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                        className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-200 cursor-pointer"
+                      >
+                        {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Create Account Button */}
+                  <div className="pt-2">
+                    <button
+                      type="submit"
+                      disabled={isLoading}
+                      className="w-full py-3.5 px-5 rounded-2xl bg-gradient-to-r from-indigo-600 via-purple-600 to-cyan-600 hover:from-indigo-500 hover:via-purple-500 hover:to-cyan-500 text-white font-bold text-sm sm:text-base flex items-center justify-center gap-2 shadow-xl shadow-indigo-600/30 transition-all cursor-pointer disabled:opacity-75"
+                    >
+                      {isLoading ? (
+                        <>
+                          <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                          <span>Locking Device & Creating Account...</span>
+                        </>
+                      ) : (
+                        <>
+                          <CheckCircle2 className="w-4 h-4 text-cyan-200" />
+                          <span>Create Account</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </form>
+              )}
+
+              {/* SECTION 3: RETURNING USER LOGIN SCREEN */}
+              {authMode === 'login' && (
+                <form onSubmit={handleLogin} className="space-y-4 animate-fadeIn">
+                  <div className="flex items-center justify-between pb-1">
+                    <button
+                      type="button"
+                      onClick={() => setAuthMode('welcome')}
+                      className="inline-flex items-center gap-1 text-xs text-slate-400 hover:text-white transition-colors cursor-pointer"
+                    >
+                      <ArrowLeft className="w-3.5 h-3.5" />
+                      <span>Back</span>
+                    </button>
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-cyan-400 bg-cyan-950/80 border border-cyan-700/60 px-2 py-0.5 rounded-full flex items-center gap-1">
+                      <Lock className="w-2.5 h-2.5" /> Device Locked
+                    </span>
+                  </div>
+
+                  <div>
+                    <h2 className="text-2xl font-black text-white tracking-tight">
+                      Sign In
+                    </h2>
+                    <p className="text-xs text-slate-300 mt-1 leading-relaxed">
+                      Enter the credentials associated with this registered device.
+                    </p>
+                  </div>
+
+                  {/* Locked Account Info Pill */}
+                  {deviceStatus.lockedUsername && (
+                    <div className="p-3 rounded-xl bg-indigo-950/40 border border-indigo-800/60 text-xs flex items-center justify-between">
+                      <span className="text-slate-400">Registered Username:</span>
+                      <span className="font-mono font-bold text-white bg-indigo-900/60 px-2 py-0.5 rounded">
+                        {deviceStatus.lockedUsername}
+                      </span>
+                    </div>
+                  )}
+
+                  {errorMessage && (
+                    <div className="p-3 rounded-xl bg-rose-950/70 border border-rose-800 text-rose-200 text-xs flex items-start gap-2.5 animate-fadeIn">
+                      <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                      {/* Exact Required error: "Invalid username or password. Please try again." */}
+                      <span className="leading-relaxed font-semibold">{errorMessage}</span>
+                    </div>
+                  )}
+
+                  {successMessage && (
+                    <div className="p-3 rounded-xl bg-emerald-950/70 border border-emerald-800 text-emerald-200 text-xs flex items-center gap-2.5 animate-fadeIn">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                      <span>{successMessage}</span>
+                    </div>
+                  )}
+
+                  {/* Field: Username */}
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-bold text-slate-200">
+                      Username <span className="text-rose-400">*</span>
+                    </label>
+                    <div className="relative">
+                      <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+                        <User className="w-4 h-4" />
+                      </div>
+                      <input
+                        type="text"
+                        required
+                        value={username}
+                        onChange={(e) => setUsername(e.target.value)}
+                        placeholder="Enter your username"
+                        className="w-full pl-10 pr-4 py-3 rounded-xl bg-slate-900/90 border border-slate-700 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-white placeholder-slate-500 text-sm outline-none transition-all"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Field: Password */}
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-bold text-slate-200">
+                      Password <span className="text-rose-400">*</span>
+                    </label>
+                    <div className="relative">
+                      <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+                        <KeyRound className="w-4 h-4" />
+                      </div>
+                      <input
+                        type={showPassword ? 'text' : 'password'}
+                        required
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        placeholder="Enter your password"
+                        className="w-full pl-10 pr-10 py-3 rounded-xl bg-slate-900/90 border border-slate-700 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-white placeholder-slate-500 text-sm outline-none transition-all"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-200 cursor-pointer"
+                      >
+                        {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Login Button */}
+                  <div className="pt-2">
+                    <button
+                      type="submit"
+                      disabled={isLoading}
+                      className="w-full py-3.5 px-5 rounded-2xl bg-gradient-to-r from-indigo-600 via-purple-600 to-cyan-600 hover:from-indigo-500 hover:via-purple-500 hover:to-cyan-500 text-white font-bold text-sm sm:text-base flex items-center justify-center gap-2 shadow-xl shadow-indigo-600/30 transition-all cursor-pointer disabled:opacity-75"
+                    >
+                      {isLoading ? (
+                        <>
+                          <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                          <span>Verifying Credentials...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Lock className="w-4 h-4 text-cyan-200" />
+                          <span>Login</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </form>
+              )}
+
+              {/* Security info footer & Device Policy explanation */}
+              <div className="pt-4 border-t border-slate-800 text-center space-y-2">
                 <button
                   type="button"
-                  onClick={handleGoogleSignIn}
-                  disabled={isLoading}
-                  className="w-full py-4 px-5 rounded-2xl bg-white hover:bg-slate-100 active:bg-slate-200 text-slate-900 font-bold text-sm sm:text-base flex items-center justify-center gap-3 shadow-xl shadow-white/10 hover:shadow-white/20 hover:scale-[1.01] active:scale-[0.99] transition-all cursor-pointer disabled:opacity-75 disabled:cursor-not-allowed group"
+                  onClick={() => setShowDevicePolicyModal(true)}
+                  className="text-[11px] text-indigo-400 hover:text-indigo-300 inline-flex items-center gap-1 underline decoration-indigo-500/50 cursor-pointer transition-colors"
                 >
-                  {isLoading ? (
-                    <div className="w-5 h-5 border-2 border-slate-900 border-t-transparent rounded-full animate-spin" />
-                  ) : (
-                    <svg className="w-5 h-5 shrink-0" viewBox="0 0 24 24">
-                      <path
-                        fill="#4285F4"
-                        d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-                      />
-                      <path
-                        fill="#34A853"
-                        d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-                      />
-                      <path
-                        fill="#FBBC05"
-                        d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
-                      />
-                      <path
-                        fill="#EA4335"
-                        d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
-                      />
-                    </svg>
-                  )}
-                  {/* Required Exact Label */}
-                  <span>{isLoading ? 'Connecting Google Account...' : 'Continue with Google'}</span>
+                  <Info className="w-3 h-3" />
+                  <span>How Device Hardware Locking works & technical boundaries</span>
                 </button>
 
-                <div className="flex items-center justify-center gap-2 text-[11px] text-slate-400 pt-1">
-                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>Real Google OAuth 2.0 · Verified delivery email</span>
-                </div>
-              </div>
-
-              {/* Security and privacy assurances */}
-              <div className="pt-4 border-t border-slate-800 text-center space-y-2">
-                <p className="text-[11px] text-slate-400 leading-relaxed">
-                  We only request your verified email and profile name to manage video creations and deliver completed files. We never access passwords.
-                </p>
-                <div className="flex items-center justify-center gap-3 text-[11px] text-slate-500">
+                <div className="flex items-center justify-center gap-3 text-[11px] text-slate-500 pt-1">
                   <span className="flex items-center gap-1">
-                    <CheckCircle2 className="w-3 h-3 text-cyan-400" /> Safe & Private
+                    <CheckCircle2 className="w-3 h-3 text-cyan-400" /> 1 Account Per Device
                   </span>
                   <span>·</span>
                   <span className="flex items-center gap-1">
-                    <CheckCircle2 className="w-3 h-3 text-indigo-400" /> Instant Setup
+                    <CheckCircle2 className="w-3 h-3 text-indigo-400" /> Scrypt Encrypted
                   </span>
                 </div>
               </div>
@@ -260,6 +693,51 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onSuccess }) => {
           </div>
         </div>
       </div>
+
+      {/* Device Policy & Architecture Modal */}
+      {showDevicePolicyModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-[#0B101E] border border-slate-800 rounded-3xl max-w-lg w-full p-6 space-y-4 shadow-2xl relative">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+              <div className="flex items-center gap-2">
+                <Cpu className="w-5 h-5 text-indigo-400" />
+                <h3 className="text-base font-bold text-white">Device Registration Architecture</h3>
+              </div>
+              <button
+                onClick={() => setShowDevicePolicyModal(false)}
+                className="w-7 h-7 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center text-xs font-bold cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs text-slate-300 leading-relaxed max-h-[70vh] overflow-y-auto pr-1">
+              <p>
+                <strong>1. Server-Enforced Policy:</strong> Unlike naive client-only restrictions, this application records your machine's hardware profile (GPU model via WebGL, screen geometry, CPU core concurrency, and subpixel canvas anti-aliasing signature) and links it directly to a server database record.
+              </p>
+              <p>
+                <strong>2. Resistance to Cache & Cookie Clearing:</strong> Even if browser localStorage, cookies, or cache are wiped, the server re-matches the hardware signature upon reconnection and rejects any attempt to register a second account.
+              </p>
+              <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 space-y-1">
+                <p className="font-bold text-white flex items-center gap-1.5">
+                  <Info className="w-3.5 h-3.5 text-cyan-400" />
+                  Technical Boundaries of Browser Identification:
+                </p>
+                <p className="text-[11px] text-slate-400">
+                  Because web browsers run inside OS-level security sandboxes, no web application can access physical hardware serial numbers (like CPU serial or MAC address) without a native executable. If you open a completely separate browser engine or reinstall your operating system, the browser sandbox prevents cross-browser access. However, within the environment, our multi-layer hardware fingerprinting ensures strict one-account compliance.
+                </p>
+              </div>
+            </div>
+
+            <button
+              onClick={() => setShowDevicePolicyModal(false)}
+              className="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs cursor-pointer transition-all"
+            >
+              Close & Return to Sign In
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

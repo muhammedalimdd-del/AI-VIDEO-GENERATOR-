@@ -852,6 +852,20 @@
       "role": "user",
       "trialUsedAt": "2026-10-30T11:24:48.090Z",
       "trialRequestId": "AVM-2026-F33E"
+    },
+    {
+      "uid": "usr_3d531e1646ba30b7",
+      "username": "videocreator1",
+      "displayName": "videocreator1",
+      "email": "videocreator1@aivideomaker.local",
+      "passwordHash": "9d03c5ff2a2263a7559347c33a0d76996a08d9182c0e897d546f6e13e8fedca160f82f026e304b2e5683283ccd2b4c37f46c61a880555370252ebfb3fc631141",
+      "passwordSalt": "936841f0120d4f96d75e428a6743ee69",
+      "deviceId": "test_device_alpha",
+      "deviceFingerprint": "fp_hash_alpha_9988",
+      "createdAt": "2026-11-04T03:33:22.170Z",
+      "lastLoginAt": "2026-11-04T03:33:45.896Z",
+      "trialStatus": "eligible",
+      "role": "user"
     }
   ],
   "auditLogs": [
@@ -862,6 +876,29 @@
       "adminEmail": "admin@aivideomaker.com",
       "targetUserEmail": "test.creator@gmail.com",
       "details": "Changed trial status from used to eligible. Reason: Customer loyalty bonus"
+    }
+  ],
+  "devices": [
+    {
+      "deviceId": "test_device_alpha",
+      "fingerprintHash": "fp_hash_alpha_9988",
+      "registeredUserId": "usr_3d531e1646ba30b7",
+      "registeredUsername": "videocreator1",
+      "ipSubnet": "127.0.0.1",
+      "userAgent": "curl/7.88.1",
+      "firstRegisteredAt": "2026-11-04T03:33:22.170Z",
+      "lastSeenAt": "2026-11-04T03:33:45.895Z",
+      "registrationLockActive": true
+    }
+  ],
+  "sessions": [
+    {
+      "token": "ad35d2571307d3474d67cfc88e930202fc1aabde24fbacf01f82d0d42cbf73bb",
+      "userId": "usr_3d531e1646ba30b7",
+      "username": "videocreator1",
+      "deviceId": "test_device_alpha",
+      "createdAt": "2026-11-04T03:33:22.170Z",
+      "expiresAt": "2026-12-04T03:33:22.243Z"
     }
   ]
 }

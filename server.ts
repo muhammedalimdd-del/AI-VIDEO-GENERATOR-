@@ -17,8 +17,9 @@ import {
 dotenv.config();
 
 const app = express();
-const PORT = parseInt(process.env.PORT || '3000', 10);
 const isProd = process.env.NODE_ENV === 'production';
+// In AI Studio development, dev server must run on port 3000
+const PORT = isProd ? parseInt(process.env.PORT || '8080', 10) : 3000;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123';
 
 // Configure express body parser
@@ -99,36 +100,145 @@ app.get('/api/health', (_req, res) => {
   });
 });
 
-// 2. Google Account Auth Sync
-app.post('/api/auth/google-sync', (req, res) => {
+// ================= DEVICE-LOCKED AUTHENTICATION API ROUTES =================
+
+// 1. Check Device Registration Status
+app.post('/api/device/status', (req, res) => {
   try {
-    const { uid, email, displayName, photoURL } = req.body;
-    if (!email || !email.includes('@')) {
-      return res.status(400).json({ error: 'Valid Google email is required.' });
-    }
-    const user = db.syncUser({
-      uid: uid || `g-user-${crypto.randomBytes(6).toString('hex')}`,
-      email,
-      displayName,
-      photoURL
+    const { deviceId, fingerprintHash } = req.body;
+    const status = db.checkDeviceStatus(deviceId, fingerprintHash);
+    res.json({
+      success: true,
+      ...status
     });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 2. First-Time Device Account Creation
+app.post('/api/auth/register-device', (req, res) => {
+  try {
+    const { username, password, confirmPassword, deviceId, fingerprintHash, contactEmail } = req.body;
+
+    if (!username || !password) {
+      return res.status(400).json({ error: 'Username and password are required.' });
+    }
+    if (password !== confirmPassword) {
+      return res.status(400).json({ error: 'Passwords do not match. Please verify and try again.' });
+    }
+
+    const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || '';
+    const userAgent = req.headers['user-agent'] || '';
+
+    const result = db.registerDeviceAccount({
+      username,
+      password,
+      deviceId,
+      fingerprintHash,
+      ipSubnet: String(clientIp).split(',')[0].trim(),
+      userAgent: String(userAgent),
+      contactEmail
+    });
+
+    res.json({
+      success: true,
+      user: result.user,
+      token: result.session.token,
+      deviceId: result.device.deviceId,
+      message: 'Account created and device locked successfully.'
+    });
+  } catch (err: any) {
+    const isConflict = err.message && (err.message.includes('already permanently registered') || err.message.includes('already taken'));
+    res.status(isConflict ? 403 : 400).json({
+      error: err.message || 'Failed to create account.'
+    });
+  }
+});
+
+// 3. Returning User Device Login
+app.post('/api/auth/login-device', (req, res) => {
+  try {
+    const { username, password, deviceId, fingerprintHash } = req.body;
+
+    const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || '';
+
+    const result = db.loginDeviceAccount({
+      username,
+      password,
+      deviceId,
+      fingerprintHash,
+      ipSubnet: String(clientIp).split(',')[0].trim()
+    });
+
+    res.json({
+      success: true,
+      user: result.user,
+      token: result.session.token
+    });
+  } catch (err: any) {
+    res.status(401).json({
+      error: err.message || 'Invalid username or password. Please try again.'
+    });
+  }
+});
+
+// 4. Validate Current Session
+app.get('/api/auth/session', (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    const token =
+      (req.headers['x-session-token'] as string) ||
+      (authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : null);
+
+    if (!token) {
+      return res.status(401).json({ error: 'No active session token provided.' });
+    }
+
+    const user = db.getSessionUser(token);
+    if (!user) {
+      return res.status(401).json({ error: 'Session expired or invalid.' });
+    }
 
     res.json({
       success: true,
       user
     });
   } catch (err: any) {
-    res.status(500).json({ error: err.message || 'Failed to sync Google user profile.' });
+    res.status(500).json({ error: err.message });
   }
 });
 
-// 3. Get User Profile & Trial Eligibility
+// 5. User Sign Out (Session revocation; device remains permanently locked)
+app.post('/api/auth/logout', (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    const token =
+      (req.headers['x-session-token'] as string) ||
+      (authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : null);
+
+    if (token) {
+      db.revokeSession(token);
+    }
+
+    res.json({
+      success: true,
+      message: 'Signed out successfully. Device registration preserved.'
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 6. Get User Profile & Trial Eligibility
 app.get('/api/auth/me', (req, res) => {
   const uid = (req.headers['x-user-uid'] as string) || (req.query.uid as string);
+  const username = (req.headers['x-username'] as string) || (req.query.username as string);
   const email = (req.headers['x-user-email'] as string) || (req.query.email as string);
 
   let user = null;
   if (uid) user = db.getUserByUid(uid);
+  if (!user && username) user = db.getUserByUsername(username);
   if (!user && email) user = db.getUserByEmail(email);
 
   if (!user) {
@@ -137,7 +247,7 @@ app.get('/api/auth/me', (req, res) => {
 
   res.json({
     success: true,
-    user
+    user: db.getUserByUid(user.uid)
   });
 });
 
@@ -880,6 +990,10 @@ app.post('/api/admin/requests/:id/resend-owner-email', requireAdmin, async (req,
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }
+});
+
+app.get('/api/admin/devices', requireAdmin, (_req, res) => {
+  res.json({ success: true, devices: db.getAllDevices() });
 });
 
 app.get('/api/admin/settings', requireAdmin, (_req, res) => {

@@ -11,10 +11,36 @@ export type VideoStatus =
 
 export type TrialStatus = 'eligible' | 'reserved' | 'used';
 
+export interface DeviceRegistration {
+  deviceId: string;
+  fingerprintHash: string;
+  registeredUserId: string;
+  registeredUsername: string;
+  ipSubnet: string;
+  userAgent: string;
+  firstRegisteredAt: string;
+  lastSeenAt: string;
+  registrationLockActive: boolean;
+}
+
+export interface AuthSession {
+  token: string;
+  userId: string;
+  username: string;
+  deviceId: string;
+  createdAt: string;
+  expiresAt: string;
+}
+
 export interface UserAccount {
-  uid: string; // Google UID
-  email: string; // Verified Google email
+  uid: string; // User ID
+  username: string; // Unique locked username
+  email: string; // User email / contact email
   displayName: string;
+  passwordHash?: string; // Salted scrypt/PBKDF2 hash
+  passwordSalt?: string; // Cryptographic salt
+  deviceId?: string; // Associated device ID
+  deviceFingerprint?: string; // Hardware/GPU canvas fingerprint
   photoURL?: string;
   createdAt: string;
   lastLoginAt: string;
@@ -261,6 +287,8 @@ export interface EmailLog {
 
 export interface DatabaseSchema {
   users: UserAccount[];
+  devices: DeviceRegistration[];
+  sessions: AuthSession[];
   requests: VideoRequest[];
   budgetRequests: BudgetRequest[];
   emailLogs: EmailLog[];

@@ -80,9 +80,9 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-1.5">
                 <h3 className="text-base font-bold text-white truncate">
-                  {currentUser.displayName || 'Google Creator'}
+                  {currentUser.username || currentUser.displayName || 'Video Creator'}
                 </h3>
-                <span className="p-0.5 rounded-full bg-cyan-950 text-cyan-400 border border-cyan-700/50" title="Verified Google Account">
+                <span className="p-0.5 rounded-full bg-cyan-950 text-cyan-400 border border-cyan-700/50" title="Device-Locked Account">
                   <ShieldCheck className="w-3.5 h-3.5" />
                 </span>
               </div>
@@ -119,10 +119,20 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
             <div className="flex items-center justify-between p-3 rounded-xl bg-slate-900/70 border border-slate-800/70">
               <span className="text-slate-400 flex items-center gap-2">
                 <Key className="w-3.5 h-3.5 text-indigo-400" />
-                Google User ID
+                Account UID
               </span>
               <span className="font-mono text-slate-400 text-[11px] truncate max-w-[170px]">
                 {currentUser.uid}
+              </span>
+            </div>
+
+            <div className="flex items-center justify-between p-3 rounded-xl bg-slate-900/70 border border-slate-800/70">
+              <span className="text-slate-400 flex items-center gap-2">
+                <ShieldCheck className="w-3.5 h-3.5 text-cyan-400" />
+                Device Lock Policy
+              </span>
+              <span className="font-mono text-cyan-300 text-[11px] font-bold">
+                1 Account Per Device (Active)
               </span>
             </div>
 

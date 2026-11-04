@@ -24,8 +24,10 @@ export interface VideoStyleOption {
 
 export interface UserAccount {
   uid: string;
+  username?: string;
   email: string;
   displayName: string;
+  deviceId?: string;
   photoURL?: string;
   createdAt: string;
   lastLoginAt: string;

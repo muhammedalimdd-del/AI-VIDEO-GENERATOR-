@@ -25,11 +25,11 @@ export const Step7CustomerDelivery: React.FC<Step7Props> = ({
           <span>Step 7: Customer Contact & Delivery Channel</span>
         </h3>
         <p className="text-sm text-slate-400">
-          Your completed video and request updates will be sent to your verified Google email address.
+          Your completed video and request updates will be sent to your delivery email address.
         </p>
       </div>
 
-      {/* Verified Google Account Banner */}
+      {/* Verified Account Banner */}
       <div className="rounded-xl bg-gradient-to-r from-indigo-950/50 via-purple-950/40 to-slate-900 border border-indigo-700/60 p-5 flex items-start gap-4">
         <div className="p-2.5 rounded-lg bg-indigo-900/60 text-cyan-300 shrink-0">
           <ShieldCheck className="w-5 h-5" />
@@ -37,14 +37,14 @@ export const Step7CustomerDelivery: React.FC<Step7Props> = ({
         <div className="text-xs sm:text-sm text-slate-300 leading-relaxed">
           <div className="flex items-center gap-2 mb-1">
             <p className="font-semibold text-white">
-              Authenticated Google Account Delivery
+              Authenticated Account Delivery
             </p>
             <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-950 text-emerald-300 border border-emerald-700/60 flex items-center gap-1">
               <CheckCircle2 className="w-3 h-3" />
               Verified
             </span>
           </div>
-          Your completed video and request updates will be sent to this email address. We will never ask for your Google password or share your private brief.
+          Your completed video files, download links, and status notifications will be delivered directly to your inbox. Your account and creative briefs remain private and protected.
         </div>
       </div>
 

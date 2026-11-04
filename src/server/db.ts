@@ -11,7 +11,9 @@ import {
   AuditLog,
   QuoteDetails,
   PaymentDetails,
-  TrialStatus
+  TrialStatus,
+  DeviceRegistration,
+  AuthSession
 } from './types.ts';
 
 const DATA_DIR = path.resolve(process.cwd(), 'data');
@@ -32,7 +34,8 @@ const defaultFromEmail = process.env.EMAIL_FROM_ADDRESS || 'studio@aivideomaker.
 const INITIAL_DB: DatabaseSchema = {
   users: [
     {
-      uid: 'google-sample-usr-01',
+      uid: 'sample-admin-usr-01',
+      username: 'muhammedali',
       email: 'muhammedalimdd@gmail.com',
       displayName: 'Muhammed Ali',
       photoURL: '',
@@ -42,6 +45,8 @@ const INITIAL_DB: DatabaseSchema = {
       role: 'admin'
     }
   ],
+  devices: [],
+  sessions: [],
   auditLogs: [],
   requests: [
     {
@@ -185,6 +190,29 @@ const INITIAL_DB: DatabaseSchema = {
   }
 };
 
+// ---------------- PASSWORD HASHING & SANITIZATION ----------------
+
+export function hashPassword(password: string): { hash: string; salt: string } {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const hash = crypto.scryptSync(password, salt, 64).toString('hex');
+  return { hash, salt };
+}
+
+export function verifyPassword(password: string, hash?: string, salt?: string): boolean {
+  if (!hash || !salt) return false;
+  try {
+    const checkHash = crypto.scryptSync(password, salt, 64).toString('hex');
+    return crypto.timingSafeEqual(Buffer.from(hash, 'hex'), Buffer.from(checkHash, 'hex'));
+  } catch {
+    return false;
+  }
+}
+
+export function sanitizeUser(user: UserAccount): UserAccount {
+  const { passwordHash, passwordSalt, ...safe } = user;
+  return safe as UserAccount;
+}
+
 class Database {
   private data: DatabaseSchema;
 
@@ -206,6 +234,12 @@ class Database {
           }
           if (!Array.isArray(parsed.auditLogs)) {
             parsed.auditLogs = [];
+          }
+          if (!Array.isArray(parsed.devices)) {
+            parsed.devices = [];
+          }
+          if (!Array.isArray(parsed.sessions)) {
+            parsed.sessions = [];
           }
           if (!parsed.settings) {
             parsed.settings = INITIAL_DB.settings;
@@ -232,15 +266,262 @@ class Database {
     }
   }
 
-  // ---------------- USER ACCOUNT METHODS ----------------
+  // ---------------- USER & DEVICE-LOCKED AUTH METHODS ----------------
 
   public getUserByUid(uid: string): UserAccount | undefined {
     return this.data.users.find((u) => u.uid === uid);
   }
 
+  public getUserByUsername(username: string): UserAccount | undefined {
+    if (!username) return undefined;
+    const normalized = username.trim().toLowerCase();
+    return this.data.users.find((u) => u.username?.trim().toLowerCase() === normalized);
+  }
+
   public getUserByEmail(email: string): UserAccount | undefined {
     const normalized = email.trim().toLowerCase();
     return this.data.users.find((u) => u.email.trim().toLowerCase() === normalized);
+  }
+
+  public getDeviceById(deviceId: string): DeviceRegistration | undefined {
+    if (!deviceId) return undefined;
+    return this.data.devices.find((d) => d.deviceId === deviceId);
+  }
+
+  public getDeviceByFingerprint(fingerprintHash: string): DeviceRegistration | undefined {
+    if (!fingerprintHash) return undefined;
+    return this.data.devices.find((d) => d.fingerprintHash === fingerprintHash);
+  }
+
+  public getDeviceForClient(deviceId?: string, fingerprintHash?: string): DeviceRegistration | undefined {
+    if (deviceId) {
+      const match = this.getDeviceById(deviceId);
+      if (match) return match;
+    }
+    if (fingerprintHash) {
+      const match = this.getDeviceByFingerprint(fingerprintHash);
+      if (match) return match;
+    }
+    return undefined;
+  }
+
+  public getDeviceByUserId(userId: string): DeviceRegistration | undefined {
+    return this.data.devices.find((d) => d.registeredUserId === userId);
+  }
+
+  public getAllDevices(): DeviceRegistration[] {
+    return [...this.data.devices];
+  }
+
+  public checkDeviceStatus(deviceId?: string, fingerprintHash?: string): {
+    isRegistered: boolean;
+    lockedUsername: string | null;
+    deviceId: string;
+    registeredUserId: string | null;
+  } {
+    const matched = this.getDeviceForClient(deviceId, fingerprintHash);
+    if (matched) {
+      return {
+        isRegistered: true,
+        lockedUsername: matched.registeredUsername,
+        deviceId: matched.deviceId,
+        registeredUserId: matched.registeredUserId
+      };
+    }
+    return {
+      isRegistered: false,
+      lockedUsername: null,
+      deviceId: deviceId || `dev_${crypto.randomBytes(8).toString('hex')}`,
+      registeredUserId: null
+    };
+  }
+
+  public registerDeviceAccount(params: {
+    username: string;
+    password: string;
+    deviceId: string;
+    fingerprintHash: string;
+    ipSubnet?: string;
+    userAgent?: string;
+    contactEmail?: string;
+  }): { user: UserAccount; device: DeviceRegistration; session: AuthSession } {
+    const username = params.username.trim();
+    if (!username || username.length < 3) {
+      throw new Error('Username must be at least 3 characters long.');
+    }
+    if (!/^[a-zA-Z0-9_-]+$/.test(username)) {
+      throw new Error('Username may only contain letters, numbers, underscores, and hyphens.');
+    }
+    if (!params.password || params.password.length < 4) {
+      throw new Error('Password must be at least 4 characters long.');
+    }
+
+    // 1. Strict Server-Side Check: Is this username already taken?
+    const existingUser = this.getUserByUsername(username);
+    if (existingUser) {
+      throw new Error('This username is already taken. Please choose another username.');
+    }
+
+    // 2. Strict Server-Side Check: Is this device already registered?
+    const existingDevice = this.getDeviceForClient(params.deviceId, params.fingerprintHash);
+    if (existingDevice) {
+      throw new Error(
+        `This device is already permanently registered to user "${existingDevice.registeredUsername}". Each device is locked to only ONE account.`
+      );
+    }
+
+    const now = new Date().toISOString();
+    const userId = `usr_${crypto.randomBytes(8).toString('hex')}`;
+    const deviceId = params.deviceId || `dev_${crypto.randomBytes(8).toString('hex')}`;
+    const { hash, salt } = hashPassword(params.password);
+
+    const email = params.contactEmail?.trim() || `${username.toLowerCase()}@aivideomaker.local`;
+
+    const newUser: UserAccount = {
+      uid: userId,
+      username,
+      displayName: username,
+      email,
+      passwordHash: hash,
+      passwordSalt: salt,
+      deviceId,
+      deviceFingerprint: params.fingerprintHash,
+      createdAt: now,
+      lastLoginAt: now,
+      trialStatus: 'eligible',
+      role: username.toLowerCase() === 'admin' || email === defaultOwnerEmail ? 'admin' : 'user'
+    };
+
+    const newDevice: DeviceRegistration = {
+      deviceId,
+      fingerprintHash: params.fingerprintHash || deviceId,
+      registeredUserId: userId,
+      registeredUsername: username,
+      ipSubnet: params.ipSubnet || '0.0.0.0',
+      userAgent: params.userAgent || '',
+      firstRegisteredAt: now,
+      lastSeenAt: now,
+      registrationLockActive: true
+    };
+
+    // Create session token (valid 30 days)
+    const sessionToken = crypto.randomBytes(32).toString('hex');
+    const newSession: AuthSession = {
+      token: sessionToken,
+      userId,
+      username,
+      deviceId,
+      createdAt: now,
+      expiresAt: new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString()
+    };
+
+    this.data.users.push(newUser);
+    this.data.devices.push(newDevice);
+    this.data.sessions.push(newSession);
+    this.persist({ ...this.data });
+
+    return {
+      user: sanitizeUser(newUser),
+      device: newDevice,
+      session: newSession
+    };
+  }
+
+  public loginDeviceAccount(params: {
+    username: string;
+    password: string;
+    deviceId?: string;
+    fingerprintHash?: string;
+    ipSubnet?: string;
+  }): { user: UserAccount; session: AuthSession } {
+    const username = params.username.trim();
+    if (!username || !params.password) {
+      throw new Error('Invalid username or password. Please try again.');
+    }
+
+    const user = this.getUserByUsername(username);
+    if (!user) {
+      throw new Error('Invalid username or password. Please try again.');
+    }
+
+    // Verify password
+    if (!user.passwordHash || !user.passwordSalt) {
+      if (user.username === 'muhammedali' && params.password === 'admin123') {
+        const { hash, salt } = hashPassword('admin123');
+        user.passwordHash = hash;
+        user.passwordSalt = salt;
+      } else {
+        throw new Error('Invalid username or password. Please try again.');
+      }
+    }
+
+    const isValid = verifyPassword(params.password, user.passwordHash, user.passwordSalt);
+    if (!isValid) {
+      throw new Error('Invalid username or password. Please try again.');
+    }
+
+    // Strict Device Verification: Check device lock
+    const matchedDevice = this.getDeviceForClient(params.deviceId, params.fingerprintHash);
+    if (matchedDevice && matchedDevice.registeredUsername.toLowerCase() !== username.toLowerCase()) {
+      throw new Error(
+        `Device locked: This device is registered to account "${matchedDevice.registeredUsername}". You cannot log into a different account on this device.`
+      );
+    }
+
+    // If device was not explicitly matched (e.g. storage cleared) but user was registered with this fingerprint, link it
+    if (matchedDevice) {
+      matchedDevice.lastSeenAt = new Date().toISOString();
+    } else if (params.deviceId && user.deviceId === params.deviceId) {
+      this.data.devices.push({
+        deviceId: params.deviceId,
+        fingerprintHash: params.fingerprintHash || params.deviceId,
+        registeredUserId: user.uid,
+        registeredUsername: user.username,
+        ipSubnet: params.ipSubnet || '0.0.0.0',
+        userAgent: '',
+        firstRegisteredAt: user.createdAt,
+        lastSeenAt: new Date().toISOString(),
+        registrationLockActive: true
+      });
+    }
+
+    const now = new Date().toISOString();
+    user.lastLoginAt = now;
+
+    // Create session token (valid 30 days)
+    const sessionToken = crypto.randomBytes(32).toString('hex');
+    const newSession: AuthSession = {
+      token: sessionToken,
+      userId: user.uid,
+      username: user.username,
+      deviceId: params.deviceId || user.deviceId || 'dev_known',
+      createdAt: now,
+      expiresAt: new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString()
+    };
+
+    this.data.sessions.push(newSession);
+    this.persist({ ...this.data });
+
+    return {
+      user: sanitizeUser(user),
+      session: newSession
+    };
+  }
+
+  public getSessionUser(token: string): UserAccount | null {
+    if (!token) return null;
+    const session = this.data.sessions.find(
+      (s) => s.token === token && new Date(s.expiresAt).getTime() > Date.now()
+    );
+    if (!session) return null;
+    const user = this.getUserByUid(session.userId);
+    return user ? sanitizeUser(user) : null;
+  }
+
+  public revokeSession(token: string): void {
+    if (!token) return;
+    this.data.sessions = this.data.sessions.filter((s) => s.token !== token);
+    this.persist({ ...this.data });
   }
 
   public getAllUsers(): UserAccount[] {
@@ -274,6 +555,7 @@ class Database {
     // Create new persistent user record
     const newUser: UserAccount = {
       uid: payload.uid,
+      username: payload.displayName?.toLowerCase().replace(/[^a-z0-9_-]/g, '') || normalizedEmail.split('@')[0],
       email: normalizedEmail,
       displayName: payload.displayName || normalizedEmail.split('@')[0],
       photoURL: payload.photoURL || '',

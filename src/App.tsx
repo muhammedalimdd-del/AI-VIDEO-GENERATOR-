@@ -20,7 +20,7 @@ import { WelcomeScreen } from './components/Auth/WelcomeScreen.tsx';
 import { MyRequestsView } from './components/Customer/MyRequestsView.tsx';
 import { UserProfileModal } from './components/Customer/UserProfileModal.tsx';
 import { PrivacyModal, TermsModal, DataDeletionModal, ContactModal } from './components/Modals/LegalModals.tsx';
-import { initAuthListener, signOutGoogle } from './services/firebaseAuth.ts';
+import { checkActiveSession, logoutDeviceUser } from './services/deviceIdentity.ts';
 import { UserAccount } from './types/client.ts';
 
 type MainView = 'landing' | 'builder' | 'success' | 'tracker' | 'budget_contact' | 'my_requests';
@@ -34,7 +34,6 @@ export default function App() {
     return null;
   });
   const [isAuthInitializing, setIsAuthInitializing] = useState<boolean>(() => {
-    // If cached user exists, don't show loading screen
     try {
       if (localStorage.getItem('aivm_cached_user')) return false;
     } catch (e) {}
@@ -57,32 +56,27 @@ export default function App() {
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
   const [isContactOpen, setIsContactOpen] = useState(false);
 
-  // Setup Firebase Auth listener to keep user profile and trial status synced
+  // Validate active session with backend on load
   useEffect(() => {
-    // Safety timer to prevent any lingering loading state
-    const safetyTimer = setTimeout(() => {
-      setIsAuthInitializing(false);
-    }, 450);
-
-    const unsubscribe = initAuthListener((_firebaseUser, profile) => {
-      setIsAuthInitializing(false);
-      clearTimeout(safetyTimer);
-      if (profile) {
-        setCurrentUser(profile);
-        try {
-          localStorage.setItem('aivm_cached_user', JSON.stringify(profile));
-        } catch (e) {}
-      } else {
-        try {
-          localStorage.removeItem('aivm_cached_user');
-        } catch (e) {}
-        setCurrentUser(null);
-      }
-    });
+    let isMounted = true;
+    checkActiveSession()
+      .then((sessionUser) => {
+        if (!isMounted) return;
+        if (sessionUser) {
+          setCurrentUser(sessionUser);
+        } else {
+          setCurrentUser(null);
+        }
+      })
+      .catch((err) => {
+        console.warn('Notice: Active session check error:', err);
+      })
+      .finally(() => {
+        if (isMounted) setIsAuthInitializing(false);
+      });
 
     return () => {
-      clearTimeout(safetyTimer);
-      unsubscribe();
+      isMounted = false;
     };
   }, []);
 
@@ -168,12 +162,12 @@ export default function App() {
       localStorage.removeItem('aivm_cached_user');
       sessionStorage.removeItem('aivm_preview_mode');
     } catch (e) {}
-    await signOutGoogle();
+    await logoutDeviceUser();
     setCurrentUser(null);
     setCurrentView('landing');
   };
 
-  const handleGoogleSuccess = (userProfile: UserAccount) => {
+  const handleAuthSuccess = (userProfile: UserAccount) => {
     try {
       localStorage.setItem('aivm_cached_user', JSON.stringify(userProfile));
     } catch (e) {}
@@ -204,7 +198,7 @@ export default function App() {
   if (!currentUser) {
     return (
       <>
-        <WelcomeScreen onSuccess={handleGoogleSuccess} />
+        <WelcomeScreen onSuccess={handleAuthSuccess} />
         {/* Modals available for legal / admin */}
         <PrivacyModal isOpen={isPrivacyOpen} onClose={() => setIsPrivacyOpen(false)} />
         <TermsModal isOpen={isTermsOpen} onClose={() => setIsTermsOpen(false)} />
