@@ -16,16 +16,39 @@ import {
   AuthSession
 } from './types.ts';
 
-const DATA_DIR = path.resolve(process.cwd(), 'data');
+function resolveWritableDataDir(): string {
+  const localDir = path.resolve(process.cwd(), 'data');
+  if (process.env.VERCEL) {
+    return '/tmp/aivm-data';
+  }
+  try {
+    if (!fs.existsSync(localDir)) {
+      fs.mkdirSync(localDir, { recursive: true });
+    }
+    const testFile = path.join(localDir, '.write-test');
+    fs.writeFileSync(testFile, 'ok');
+    fs.unlinkSync(testFile);
+    return localDir;
+  } catch {
+    return '/tmp/aivm-data';
+  }
+}
+
+const DATA_DIR = resolveWritableDataDir();
 const DB_FILE = path.join(DATA_DIR, 'db.json');
+const SEED_DB_FILE = path.resolve(process.cwd(), 'data', 'db.json');
 export const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
 
 // Ensure storage directories exist
-if (!fs.existsSync(DATA_DIR)) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-}
-if (!fs.existsSync(UPLOADS_DIR)) {
-  fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+try {
+  if (!fs.existsSync(DATA_DIR)) {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+  }
+  if (!fs.existsSync(UPLOADS_DIR)) {
+    fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+  }
+} catch (dirErr) {
+  console.warn('Directory initialization notice:', dirErr);
 }
 
 const defaultOwnerEmail = process.env.OWNER_NOTIFICATION_EMAIL || 'muhammedalimdd@gmail.com';
@@ -201,8 +224,22 @@ export function hashPassword(password: string): { hash: string; salt: string } {
 export function verifyPassword(password: string, hash?: string, salt?: string): boolean {
   if (!hash || !salt) return false;
   try {
+    // Support SHA-256 salted hashes from Web Crypto / Firestore sync
+    if (hash.startsWith('sha256:')) {
+      const expected = hash.slice(7);
+      const computed = crypto.createHash('sha256').update(`${salt}:${password}`).digest('hex');
+      return expected === computed;
+    }
+    if (hash.length === 64) {
+      const computedSha = crypto.createHash('sha256').update(`${salt}:${password}`).digest('hex');
+      if (hash === computedSha) return true;
+    }
+    // Standard 64-byte (128 hex chars) scryptSync verification
     const checkHash = crypto.scryptSync(password, salt, 64).toString('hex');
-    return crypto.timingSafeEqual(Buffer.from(hash, 'hex'), Buffer.from(checkHash, 'hex'));
+    if (hash.length === checkHash.length) {
+      return crypto.timingSafeEqual(Buffer.from(hash, 'hex'), Buffer.from(checkHash, 'hex'));
+    }
+    return hash === checkHash;
   } catch {
     return false;
   }
@@ -222,8 +259,14 @@ class Database {
 
   private load(): DatabaseSchema {
     try {
-      if (fs.existsSync(DB_FILE)) {
-        const raw = fs.readFileSync(DB_FILE, 'utf-8');
+      const fileToRead = fs.existsSync(DB_FILE)
+        ? DB_FILE
+        : fs.existsSync(SEED_DB_FILE)
+        ? SEED_DB_FILE
+        : null;
+
+      if (fileToRead) {
+        const raw = fs.readFileSync(fileToRead, 'utf-8');
         const parsed = JSON.parse(raw);
         if (parsed && Array.isArray(parsed.requests)) {
           if (!Array.isArray(parsed.budgetRequests)) {
@@ -255,14 +298,16 @@ class Database {
   }
 
   private persist(dataToSave: DatabaseSchema) {
+    this.data = dataToSave;
     try {
+      if (!fs.existsSync(DATA_DIR)) {
+        fs.mkdirSync(DATA_DIR, { recursive: true });
+      }
       const tempPath = `${DB_FILE}.tmp.${Date.now()}`;
       fs.writeFileSync(tempPath, JSON.stringify(dataToSave, null, 2), 'utf-8');
       fs.renameSync(tempPath, DB_FILE);
-      this.data = dataToSave;
     } catch (err) {
-      console.error('Database write error:', err);
-      throw err;
+      console.warn('Database write notice (in-memory state preserved):', err);
     }
   }
 
@@ -344,6 +389,9 @@ class Database {
     ipSubnet?: string;
     userAgent?: string;
     contactEmail?: string;
+    passwordHash?: string;
+    passwordSalt?: string;
+    uid?: string;
   }): { user: UserAccount; device: DeviceRegistration; session: AuthSession } {
     const username = params.username.trim();
     if (!username || username.length < 3) {
@@ -356,24 +404,73 @@ class Database {
       throw new Error('Password must be at least 4 characters long.');
     }
 
-    // 1. Strict Server-Side Check: Is this username already taken?
     const existingUser = this.getUserByUsername(username);
-    if (existingUser) {
-      throw new Error('This username is already taken. Please choose another username.');
+    const existingDevice = this.getDeviceForClient(params.deviceId, params.fingerprintHash);
+
+    // If this device is already registered to this exact username and password matches, sign them in seamlessly
+    if (
+      existingUser &&
+      existingDevice &&
+      existingDevice.registeredUsername.toLowerCase() === username.toLowerCase()
+    ) {
+      if (verifyPassword(params.password, existingUser.passwordHash, existingUser.passwordSalt)) {
+        const loginRes = this.loginDeviceAccount({
+          username,
+          password: params.password,
+          deviceId: params.deviceId,
+          fingerprintHash: params.fingerprintHash,
+          ipSubnet: params.ipSubnet
+        });
+        return {
+          user: loginRes.user,
+          device: existingDevice,
+          session: loginRes.session
+        };
+      } else {
+        throw new Error(
+          `This device is already registered to account "${existingDevice.registeredUsername}". Invalid password — please sign in with your existing password.`
+        );
+      }
     }
 
-    // 2. Strict Server-Side Check: Is this device already registered?
-    const existingDevice = this.getDeviceForClient(params.deviceId, params.fingerprintHash);
+    // 1. Strict Server-Side Check: Is this device already registered to a different username?
     if (existingDevice) {
       throw new Error(
         `This device is already permanently registered to user "${existingDevice.registeredUsername}". Each device is locked to only ONE account.`
       );
     }
 
+    // 2. Strict Server-Side Check: Is this username already taken?
+    if (existingUser) {
+      // If existingUser has no device yet or matches this deviceId and password matches, link and sign in
+      if (
+        (!existingUser.deviceId || existingUser.deviceId === params.deviceId) &&
+        verifyPassword(params.password, existingUser.passwordHash, existingUser.passwordSalt)
+      ) {
+        const loginRes = this.loginDeviceAccount({
+          username,
+          password: params.password,
+          deviceId: params.deviceId,
+          fingerprintHash: params.fingerprintHash,
+          ipSubnet: params.ipSubnet
+        });
+        const linkedDevice = this.getDeviceForClient(params.deviceId, params.fingerprintHash)!;
+        return {
+          user: loginRes.user,
+          device: linkedDevice,
+          session: loginRes.session
+        };
+      }
+      throw new Error('This username is already taken. Please choose another username.');
+    }
+
     const now = new Date().toISOString();
-    const userId = `usr_${crypto.randomBytes(8).toString('hex')}`;
+    const userId = params.uid || `usr_${crypto.randomBytes(8).toString('hex')}`;
     const deviceId = params.deviceId || `dev_${crypto.randomBytes(8).toString('hex')}`;
-    const { hash, salt } = hashPassword(params.password);
+    const { hash, salt } =
+      params.passwordHash && params.passwordSalt
+        ? { hash: params.passwordHash, salt: params.passwordSalt }
+        : hashPassword(params.password);
 
     const email = params.contactEmail?.trim() || `${username.toLowerCase()}@aivideomaker.local`;
 
@@ -439,6 +536,14 @@ class Database {
       throw new Error('Invalid username or password. Please try again.');
     }
 
+    // Strict Device Verification: Check device lock first
+    const matchedDevice = this.getDeviceForClient(params.deviceId, params.fingerprintHash);
+    if (matchedDevice && matchedDevice.registeredUsername.toLowerCase() !== username.toLowerCase()) {
+      throw new Error(
+        `Device locked: This device is permanently registered to account "${matchedDevice.registeredUsername}". You cannot sign in with a different account on this device.`
+      );
+    }
+
     const user = this.getUserByUsername(username);
     if (!user) {
       throw new Error('Invalid username or password. Please try again.');
@@ -460,21 +565,30 @@ class Database {
       throw new Error('Invalid username or password. Please try again.');
     }
 
-    // Strict Device Verification: Check device lock
-    const matchedDevice = this.getDeviceForClient(params.deviceId, params.fingerprintHash);
-    if (matchedDevice && matchedDevice.registeredUsername.toLowerCase() !== username.toLowerCase()) {
+    // Check if user account is locked to a different device
+    if (
+      user.deviceId &&
+      params.deviceId &&
+      user.deviceId !== params.deviceId &&
+      user.deviceFingerprint &&
+      params.fingerprintHash &&
+      user.deviceFingerprint !== params.fingerprintHash
+    ) {
       throw new Error(
-        `Device locked: This device is registered to account "${matchedDevice.registeredUsername}". You cannot log into a different account on this device.`
+        `Account "${user.username}" is permanently locked to another device.`
       );
     }
 
-    // If device was not explicitly matched (e.g. storage cleared) but user was registered with this fingerprint, link it
+    // Update or create device lock record if not yet recorded
     if (matchedDevice) {
       matchedDevice.lastSeenAt = new Date().toISOString();
-    } else if (params.deviceId && user.deviceId === params.deviceId) {
+    } else if (params.deviceId) {
+      const devId = params.deviceId;
+      user.deviceId = user.deviceId || devId;
+      user.deviceFingerprint = user.deviceFingerprint || params.fingerprintHash || devId;
       this.data.devices.push({
-        deviceId: params.deviceId,
-        fingerprintHash: params.fingerprintHash || params.deviceId,
+        deviceId: devId,
+        fingerprintHash: params.fingerprintHash || devId,
         registeredUserId: user.uid,
         registeredUsername: user.username,
         ipSubnet: params.ipSubnet || '0.0.0.0',
@@ -505,6 +619,68 @@ class Database {
     return {
       user: sanitizeUser(user),
       session: newSession
+    };
+  }
+
+  public syncDeviceUserFromCloud(params: {
+    user: UserAccount;
+    device?: DeviceRegistration;
+    session?: AuthSession;
+  }): { user: UserAccount; token: string } {
+    const incomingUser = params.user;
+    let existingUser =
+      this.getUserByUid(incomingUser.uid) ||
+      (incomingUser.username ? this.getUserByUsername(incomingUser.username) : undefined);
+
+    if (!existingUser) {
+      existingUser = {
+        ...incomingUser,
+        createdAt: incomingUser.createdAt || new Date().toISOString(),
+        lastLoginAt: new Date().toISOString(),
+        trialStatus: incomingUser.trialStatus || 'eligible'
+      };
+      this.data.users.push(existingUser);
+    } else {
+      existingUser.lastLoginAt = new Date().toISOString();
+      if (incomingUser.passwordHash && !existingUser.passwordHash) {
+        existingUser.passwordHash = incomingUser.passwordHash;
+        existingUser.passwordSalt = incomingUser.passwordSalt;
+      }
+      if (incomingUser.deviceId && !existingUser.deviceId) {
+        existingUser.deviceId = incomingUser.deviceId;
+      }
+      if (incomingUser.deviceFingerprint && !existingUser.deviceFingerprint) {
+        existingUser.deviceFingerprint = incomingUser.deviceFingerprint;
+      }
+    }
+
+    if (params.device) {
+      const existingDev = this.getDeviceForClient(params.device.deviceId, params.device.fingerprintHash);
+      if (!existingDev) {
+        this.data.devices.push(params.device);
+      } else {
+        existingDev.lastSeenAt = new Date().toISOString();
+      }
+    }
+
+    const now = new Date().toISOString();
+    const token = params.session?.token || crypto.randomBytes(32).toString('hex');
+    const existingSession = this.data.sessions.find((s) => s.token === token);
+    if (!existingSession) {
+      this.data.sessions.push({
+        token,
+        userId: existingUser.uid,
+        username: existingUser.username,
+        deviceId: existingUser.deviceId || params.device?.deviceId || 'dev_synced',
+        createdAt: now,
+        expiresAt: new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString()
+      });
+    }
+
+    this.persist({ ...this.data });
+    return {
+      user: sanitizeUser(existingUser),
+      token
     };
   }
 

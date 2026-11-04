@@ -2,19 +2,53 @@
   "entities": {
     "User": {
       "title": "User",
-      "description": "User profile with authentication and trial eligibility",
+      "description": "User profile with device-locked username/password authentication and trial eligibility",
       "type": "object",
       "properties": {
         "uid": { "type": "string", "maxLength": 128 },
+        "username": { "type": "string", "maxLength": 64 },
         "email": { "type": "string", "maxLength": 256 },
         "displayName": { "type": "string", "maxLength": 128 },
         "photoURL": { "type": "string", "maxLength": 1024 },
+        "passwordHash": { "type": "string", "maxLength": 512 },
+        "passwordSalt": { "type": "string", "maxLength": 256 },
+        "deviceId": { "type": "string", "maxLength": 128 },
+        "deviceFingerprint": { "type": "string", "maxLength": 256 },
         "createdAt": { "type": "string", "maxLength": 64 },
         "lastLoginAt": { "type": "string", "maxLength": 64 },
         "trialStatus": { "type": "string", "enum": ["eligible", "used", "claimed"] },
         "role": { "type": "string", "enum": ["user", "admin"] }
       },
       "required": ["uid", "email", "createdAt", "trialStatus"]
+    },
+    "DeviceRegistration": {
+      "title": "DeviceRegistration",
+      "description": "Permanent hardware device lock associating one physical device with one user account",
+      "type": "object",
+      "properties": {
+        "deviceId": { "type": "string", "maxLength": 128 },
+        "fingerprintHash": { "type": "string", "maxLength": 256 },
+        "registeredUserId": { "type": "string", "maxLength": 128 },
+        "registeredUsername": { "type": "string", "maxLength": 64 },
+        "firstRegisteredAt": { "type": "string", "maxLength": 64 },
+        "lastSeenAt": { "type": "string", "maxLength": 64 },
+        "registrationLockActive": { "type": "boolean" }
+      },
+      "required": ["deviceId", "fingerprintHash", "registeredUserId", "registeredUsername", "firstRegisteredAt", "registrationLockActive"]
+    },
+    "AuthSession": {
+      "title": "AuthSession",
+      "description": "Active authenticated session token for a registered device user",
+      "type": "object",
+      "properties": {
+        "token": { "type": "string", "maxLength": 256 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "username": { "type": "string", "maxLength": 64 },
+        "deviceId": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "expiresAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["token", "userId", "username", "deviceId", "createdAt", "expiresAt"]
     },
     "VideoRequest": {
       "title": "VideoRequest",
@@ -27,13 +61,13 @@
         "updatedAt": { "type": "string", "maxLength": 64 },
         "status": {
           "type": "string",
-          "enum": ["Pending Review", "Under Review", "Script Approved", "In Production", "Rendering", "Ready for Delivery", "Delivered", "Cancelled"]
+          "enum": ["Submitted", "Pending Review", "Under Review", "Awaiting Quote Approval", "Quote Accepted", "Payment Pending", "Paid", "Approved", "Script Approved", "In Production", "Rendering", "Ready for Delivery", "Completed", "Delivered", "Declined", "Cancelled"]
         },
         "userId": { "type": "string", "maxLength": 128 },
         "userEmail": { "type": "string", "maxLength": 256 },
         "customerName": { "type": "string", "maxLength": 128 },
         "deliveryEmail": { "type": "string", "maxLength": 256 },
-        "requestType": { "type": "string", "enum": ["free_trial", "paid_order"] },
+        "requestType": { "type": "string", "enum": ["free_trial", "paid_order", "paid"] },
         "pricingMessage": { "type": "string", "maxLength": 128 },
         "title": { "type": "string", "maxLength": 256 },
         "videoType": { "type": "string", "maxLength": 128 },
@@ -55,7 +89,7 @@
         "id": { "type": "string", "maxLength": 64 },
         "createdAt": { "type": "string", "maxLength": 64 },
         "updatedAt": { "type": "string", "maxLength": 64 },
-        "status": { "type": "string", "enum": ["New", "In Review", "Contacted", "Closed"] },
+        "status": { "type": "string", "enum": ["New", "Submitted", "Under Review", "In Review", "Accepted", "Declined", "Completed", "Contacted", "Closed"] },
         "userId": { "type": "string", "maxLength": 128 },
         "customerName": { "type": "string", "maxLength": 128 },
         "customerEmail": { "type": "string", "maxLength": 256 },
@@ -84,7 +118,15 @@
   "firestore": {
     "/users/{userId}": {
       "schema": "User",
-      "description": "User profile collection containing account information and trial eligibility"
+      "description": "User profile collection containing device-locked account credentials and trial eligibility"
+    },
+    "/devices/{deviceId}": {
+      "schema": "DeviceRegistration",
+      "description": "Permanent hardware device lock collection enforcing 1 account per device"
+    },
+    "/sessions/{sessionId}": {
+      "schema": "AuthSession",
+      "description": "Active session tokens for authenticated device accounts"
     },
     "/video_requests/{requestId}": {
       "schema": "VideoRequest",

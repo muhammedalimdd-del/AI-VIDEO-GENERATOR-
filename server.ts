@@ -102,10 +102,11 @@ app.get('/api/health', (_req, res) => {
 
 // ================= DEVICE-LOCKED AUTHENTICATION API ROUTES =================
 
-// 1. Check Device Registration Status
-app.post('/api/device/status', (req, res) => {
+// 1. Check Device Registration Status (POST and GET supported)
+const handleDeviceStatus = (req: express.Request, res: express.Response) => {
   try {
-    const { deviceId, fingerprintHash } = req.body;
+    const deviceId = (req.body?.deviceId || req.query?.deviceId || '') as string;
+    const fingerprintHash = (req.body?.fingerprintHash || req.query?.fingerprintHash || '') as string;
     const status = db.checkDeviceStatus(deviceId, fingerprintHash);
     res.json({
       success: true,
@@ -114,17 +115,29 @@ app.post('/api/device/status', (req, res) => {
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }
-});
+};
+app.post('/api/device/status', handleDeviceStatus);
+app.get('/api/device/status', handleDeviceStatus);
 
 // 2. First-Time Device Account Creation
-app.post('/api/auth/register-device', (req, res) => {
+const handleRegisterDevice = (req: express.Request, res: express.Response) => {
   try {
-    const { username, password, confirmPassword, deviceId, fingerprintHash, contactEmail } = req.body;
+    const {
+      username,
+      password,
+      confirmPassword,
+      deviceId,
+      fingerprintHash,
+      contactEmail,
+      passwordHash,
+      passwordSalt,
+      uid
+    } = req.body || {};
 
     if (!username || !password) {
       return res.status(400).json({ error: 'Username and password are required.' });
     }
-    if (password !== confirmPassword) {
+    if (confirmPassword !== undefined && password !== confirmPassword) {
       return res.status(400).json({ error: 'Passwords do not match. Please verify and try again.' });
     }
 
@@ -138,7 +151,10 @@ app.post('/api/auth/register-device', (req, res) => {
       fingerprintHash,
       ipSubnet: String(clientIp).split(',')[0].trim(),
       userAgent: String(userAgent),
-      contactEmail
+      contactEmail,
+      passwordHash,
+      passwordSalt,
+      uid
     });
 
     res.json({
@@ -149,17 +165,24 @@ app.post('/api/auth/register-device', (req, res) => {
       message: 'Account created and device locked successfully.'
     });
   } catch (err: any) {
-    const isConflict = err.message && (err.message.includes('already permanently registered') || err.message.includes('already taken'));
+    const isConflict =
+      err.message &&
+      (err.message.includes('already permanently registered') ||
+        err.message.includes('already registered') ||
+        err.message.includes('already taken'));
     res.status(isConflict ? 403 : 400).json({
       error: err.message || 'Failed to create account.'
     });
   }
-});
+};
+app.post('/api/auth/register-device', handleRegisterDevice);
+app.post('/api/auth/register', handleRegisterDevice);
+app.post('/api/register', handleRegisterDevice);
 
 // 3. Returning User Device Login
-app.post('/api/auth/login-device', (req, res) => {
+const handleLoginDevice = (req: express.Request, res: express.Response) => {
   try {
-    const { username, password, deviceId, fingerprintHash } = req.body;
+    const { username, password, deviceId, fingerprintHash } = req.body || {};
 
     const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || '';
 
@@ -181,15 +204,38 @@ app.post('/api/auth/login-device', (req, res) => {
       error: err.message || 'Invalid username or password. Please try again.'
     });
   }
+};
+app.post('/api/auth/login-device', handleLoginDevice);
+app.post('/api/auth/login', handleLoginDevice);
+app.post('/api/login', handleLoginDevice);
+
+// 3b. Sync verified device user from Firestore / Cloud
+app.post('/api/auth/sync-device-user', (req, res) => {
+  try {
+    const { user, device, session } = req.body || {};
+    if (!user || !user.uid || !user.username) {
+      return res.status(400).json({ error: 'Valid user record is required for sync.' });
+    }
+    const synced = db.syncDeviceUserFromCloud({ user, device, session });
+    res.json({
+      success: true,
+      user: synced.user,
+      token: synced.token
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to sync device user.' });
+  }
 });
 
-// 4. Validate Current Session
-app.get('/api/auth/session', (req, res) => {
+// 4. Validate Current Session (GET and POST supported)
+const handleSessionCheck = (req: express.Request, res: express.Response) => {
   try {
     const authHeader = req.headers.authorization;
     const token =
       (req.headers['x-session-token'] as string) ||
-      (authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : null);
+      (authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : null) ||
+      (req.body?.token as string) ||
+      (req.query?.token as string);
 
     if (!token) {
       return res.status(401).json({ error: 'No active session token provided.' });
@@ -207,7 +253,9 @@ app.get('/api/auth/session', (req, res) => {
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
-});
+};
+app.get('/api/auth/session', handleSessionCheck);
+app.post('/api/auth/session', handleSessionCheck);
 
 // 5. User Sign Out (Session revocation; device remains permanently locked)
 app.post('/api/auth/logout', (req, res) => {
@@ -1175,7 +1223,11 @@ async function startServer() {
   });
 }
 
-startServer().catch((err) => {
-  console.error('Server failed to start:', err);
-  process.exit(1);
-});
+if (!process.env.VERCEL) {
+  startServer().catch((err) => {
+    console.error('Server failed to start:', err);
+    process.exit(1);
+  });
+}
+
+export default app;

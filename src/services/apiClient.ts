@@ -21,7 +21,7 @@ export interface SafeApiResponse<T = any> {
 export async function safeResponseJson<T = any>(
   res: Response,
   fallback: T | null = null
-): Promise<{ ok: boolean; status: number; data: T | null; error?: string }> {
+): Promise<SafeApiResponse<T>> {
   const status = res.status;
   const contentType = res.headers.get('content-type') || '';
 
@@ -35,19 +35,16 @@ export async function safeResponseJson<T = any>(
       trimmed.startsWith('<html') ||
       trimmed.startsWith('The page') ||
       trimmed.includes('Cannot GET') ||
-      trimmed.includes('Cannot POST');
+      trimmed.includes('Cannot POST') ||
+      trimmed.includes('NOT_FOUND');
 
     if (!contentType.includes('application/json') && isHtmlOrText) {
-      const cleanError =
-        status === 404
-          ? 'Requested resource not found on server.'
-          : `Server returned non-JSON response (status ${status}).`;
-
       return {
         ok: false,
         status,
         data: fallback,
-        error: cleanError
+        error: `Service endpoint unavailable (${status}).`,
+        isHtmlFallback: true
       };
     }
 
@@ -59,7 +56,8 @@ export async function safeResponseJson<T = any>(
           ok: res.ok,
           status,
           data: parsed as T,
-          error: res.ok ? undefined : parsed?.error || parsed?.message || `Request failed (${status})`
+          error: res.ok ? undefined : parsed?.error || parsed?.message || `Request failed (${status})`,
+          isHtmlFallback: false
         };
       } catch (jsonErr) {
         // Fall through to text handling
@@ -71,14 +69,16 @@ export async function safeResponseJson<T = any>(
       ok: res.ok,
       status,
       data: fallback,
-      error: res.ok ? undefined : (trimmed.length < 120 ? trimmed : `HTTP Error ${status}`)
+      error: res.ok ? undefined : (trimmed.length < 120 ? trimmed : `HTTP Error ${status}`),
+      isHtmlFallback: !contentType.includes('application/json')
     };
   } catch (readErr: any) {
     return {
       ok: false,
       status,
       data: fallback,
-      error: readErr?.message || 'Failed to read response from server.'
+      error: readErr?.message || 'Failed to read response from server.',
+      isHtmlFallback: true
     };
   }
 }
@@ -107,7 +107,8 @@ export async function safeFetchJson<T = any>(
       data: fallback,
       error: isOffline
         ? 'You appear to be offline. Please check your internet connection.'
-        : networkErr?.message || 'Network connection failed.'
+        : networkErr?.message || 'Network connection failed.',
+      isHtmlFallback: true
     };
   }
 }

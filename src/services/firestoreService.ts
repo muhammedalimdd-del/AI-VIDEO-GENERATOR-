@@ -4,6 +4,7 @@ import {
   setDoc,
   getDoc,
   getDocs,
+  deleteDoc,
   query,
   where,
   onSnapshot
@@ -13,26 +14,59 @@ import { handleFirestoreError, OperationType } from './firestoreErrors.ts';
 import { UserAccount, VideoRequestClient } from '../types/client.ts';
 
 const USERS_COLLECTION = 'users';
+const DEVICES_COLLECTION = 'devices';
+const SESSIONS_COLLECTION = 'sessions';
 const VIDEO_REQUESTS_COLLECTION = 'video_requests';
 const BUDGET_REQUESTS_COLLECTION = 'budget_requests';
 
+export interface FirestoreDeviceDoc {
+  deviceId: string;
+  fingerprintHash: string;
+  registeredUserId: string;
+  registeredUsername: string;
+  firstRegisteredAt: string;
+  lastSeenAt: string;
+  registrationLockActive: boolean;
+}
+
+export interface FirestoreSessionDoc {
+  token: string;
+  userId: string;
+  username: string;
+  deviceId: string;
+  createdAt: string;
+  expiresAt: string;
+}
+
+export interface FirestoreAuthUserDoc extends UserAccount {
+  passwordHash?: string;
+  passwordSalt?: string;
+  deviceFingerprint?: string;
+}
+
 /**
- * Persist or update user profile document in Firestore
+ * Persist or update user profile document in Firestore (including optional auth fields)
  */
-export async function saveUserToFirestore(user: UserAccount): Promise<void> {
+export async function saveUserToFirestore(user: FirestoreAuthUserDoc): Promise<void> {
   const path = `${USERS_COLLECTION}/${user.uid}`;
   try {
     const userRef = doc(db, USERS_COLLECTION, user.uid);
-    const payload = {
+    const payload: Record<string, any> = {
       uid: user.uid,
-      email: user.email || '',
-      displayName: user.displayName || 'Creator',
+      username: user.username || user.displayName || 'Creator',
+      email: user.email || `${(user.username || 'user').toLowerCase()}@aivideomaker.local`,
+      displayName: user.displayName || user.username || 'Creator',
       photoURL: user.photoURL || '',
       createdAt: user.createdAt || new Date().toISOString(),
       lastLoginAt: user.lastLoginAt || new Date().toISOString(),
       trialStatus: user.trialStatus || 'eligible',
       role: user.role || 'user'
     };
+    if (user.passwordHash) payload.passwordHash = user.passwordHash;
+    if (user.passwordSalt) payload.passwordSalt = user.passwordSalt;
+    if (user.deviceId) payload.deviceId = user.deviceId;
+    if (user.deviceFingerprint) payload.deviceFingerprint = user.deviceFingerprint;
+
     await setDoc(userRef, payload, { merge: true });
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
@@ -42,15 +76,144 @@ export async function saveUserToFirestore(user: UserAccount): Promise<void> {
 /**
  * Retrieve user profile from Firestore by UID
  */
-export async function getUserFromFirestore(uid: string): Promise<UserAccount | null> {
+export async function getUserFromFirestore(uid: string): Promise<FirestoreAuthUserDoc | null> {
   const path = `${USERS_COLLECTION}/${uid}`;
   try {
     const userRef = doc(db, USERS_COLLECTION, uid);
     const snap = await getDoc(userRef);
     if (!snap.exists()) return null;
-    return snap.data() as UserAccount;
+    return snap.data() as FirestoreAuthUserDoc;
   } catch (error) {
     handleFirestoreError(error, OperationType.GET, path);
+  }
+}
+
+/**
+ * Query a user profile in Firestore by username (case-insensitive match)
+ */
+export async function getUserByUsernameFromFirestore(username: string): Promise<FirestoreAuthUserDoc | null> {
+  const path = USERS_COLLECTION;
+  try {
+    const trimmed = username.trim();
+    const qExact = query(collection(db, USERS_COLLECTION), where('username', '==', trimmed));
+    const exactSnap = await getDocs(qExact);
+    if (!exactSnap.empty) {
+      return exactSnap.docs[0].data() as FirestoreAuthUserDoc;
+    }
+
+    // Fallback case-insensitive scan across users collection
+    const allSnap = await getDocs(collection(db, USERS_COLLECTION));
+    const lower = trimmed.toLowerCase();
+    for (const d of allSnap.docs) {
+      const data = d.data() as FirestoreAuthUserDoc;
+      if (data.username && data.username.trim().toLowerCase() === lower) {
+        return data;
+      }
+    }
+    return null;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.LIST, path);
+  }
+}
+
+/**
+ * Retrieve permanent device lock from Firestore by deviceId or fingerprintHash
+ */
+export async function getDeviceFromFirestore(
+  deviceId?: string,
+  fingerprintHash?: string
+): Promise<FirestoreDeviceDoc | null> {
+  try {
+    if (deviceId) {
+      const devRef = doc(db, DEVICES_COLLECTION, deviceId);
+      const snap = await getDoc(devRef);
+      if (snap.exists()) {
+        return snap.data() as FirestoreDeviceDoc;
+      }
+    }
+    if (fingerprintHash) {
+      const qFp = query(
+        collection(db, DEVICES_COLLECTION),
+        where('fingerprintHash', '==', fingerprintHash)
+      );
+      const fpSnap = await getDocs(qFp);
+      if (!fpSnap.empty) {
+        return fpSnap.docs[0].data() as FirestoreDeviceDoc;
+      }
+    }
+    return null;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.GET, `${DEVICES_COLLECTION}/${deviceId || 'query'}`);
+  }
+}
+
+/**
+ * Save permanent device lock to Firestore
+ */
+export async function saveDeviceToFirestore(device: FirestoreDeviceDoc): Promise<void> {
+  const path = `${DEVICES_COLLECTION}/${device.deviceId}`;
+  try {
+    const devRef = doc(db, DEVICES_COLLECTION, device.deviceId);
+    await setDoc(
+      devRef,
+      {
+        deviceId: device.deviceId,
+        fingerprintHash: device.fingerprintHash,
+        registeredUserId: device.registeredUserId,
+        registeredUsername: device.registeredUsername,
+        firstRegisteredAt: device.firstRegisteredAt,
+        lastSeenAt: device.lastSeenAt,
+        registrationLockActive: true
+      },
+      { merge: true }
+    );
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+/**
+ * Save active session token to Firestore
+ */
+export async function saveSessionToFirestore(session: FirestoreSessionDoc): Promise<void> {
+  const path = `${SESSIONS_COLLECTION}/${session.token}`;
+  try {
+    const sessionRef = doc(db, SESSIONS_COLLECTION, session.token);
+    await setDoc(sessionRef, session, { merge: true });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+/**
+ * Retrieve active session from Firestore by token
+ */
+export async function getSessionFromFirestore(token: string): Promise<FirestoreSessionDoc | null> {
+  const path = `${SESSIONS_COLLECTION}/${token}`;
+  try {
+    const sessionRef = doc(db, SESSIONS_COLLECTION, token);
+    const snap = await getDoc(sessionRef);
+    if (!snap.exists()) return null;
+    const data = snap.data() as FirestoreSessionDoc;
+    if (new Date(data.expiresAt).getTime() <= Date.now()) {
+      return null;
+    }
+    return data;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.GET, path);
+  }
+}
+
+/**
+ * Delete session from Firestore upon logout
+ */
+export async function deleteSessionFromFirestore(token: string): Promise<void> {
+  const path = `${SESSIONS_COLLECTION}/${token}`;
+  try {
+    const sessionRef = doc(db, SESSIONS_COLLECTION, token);
+    await deleteDoc(sessionRef);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
   }
 }
 

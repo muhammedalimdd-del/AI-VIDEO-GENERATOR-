@@ -1,17 +1,31 @@
 /**
- * Device Identity & Hardware Fingerprinting Service
+ * Device Identity, Hardware Fingerprinting & Multi-Tier Authentication Service
  * 
- * Provides multi-layer device identification combining:
+ * Provides:
  * 1. Persistent Hardware & WebGL GPU Fingerprinting (Canvas rendering, GPU renderer, screen geometry, CPU concurrency)
  * 2. Cross-Storage Redundant Device Identifier (localStorage, sessionStorage, persistent cookie)
- * 3. Server-side validation enforcing the strict One-Account-Per-Device policy
+ * 3. Synchronized Server + Firebase Firestore + Local Device-Locked Authentication enforcing the strict One-Account-Per-Device policy
  */
 
 import { safeFetchJson } from './apiClient.ts';
+import {
+  saveUserToFirestore,
+  getUserFromFirestore,
+  getUserByUsernameFromFirestore,
+  getDeviceFromFirestore,
+  saveDeviceToFirestore,
+  saveSessionToFirestore,
+  getSessionFromFirestore,
+  deleteSessionFromFirestore,
+  FirestoreAuthUserDoc,
+  FirestoreDeviceDoc,
+  FirestoreSessionDoc
+} from './firestoreService.ts';
 
 const DEVICE_STORAGE_KEY = 'aivm_device_id';
 const SESSION_TOKEN_KEY = 'aivm_session_token';
 const CACHED_USER_KEY = 'aivm_cached_user';
+const LOCAL_AUTH_REGISTRY_KEY = 'aivm_device_registry_v1';
 
 export interface DeviceStatusResponse {
   isRegistered: boolean;
@@ -29,30 +43,113 @@ export interface ClientHardwareProfile {
   gpuVendor: string;
 }
 
+interface LocalAuthRegistry {
+  device: FirestoreDeviceDoc | null;
+  users: Record<string, FirestoreAuthUserDoc>;
+}
+
+function getLocalRegistry(): LocalAuthRegistry {
+  try {
+    const raw = localStorage.getItem(LOCAL_AUTH_REGISTRY_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return {
+        device: parsed.device || null,
+        users: parsed.users || {}
+      };
+    }
+  } catch {}
+  return { device: null, users: {} };
+}
+
+function saveToLocalRegistry(user?: FirestoreAuthUserDoc, device?: FirestoreDeviceDoc) {
+  try {
+    const current = getLocalRegistry();
+    if (device) {
+      current.device = device;
+    }
+    if (user && user.username) {
+      current.users[user.username.trim().toLowerCase()] = user;
+    }
+    localStorage.setItem(LOCAL_AUTH_REGISTRY_KEY, JSON.stringify(current));
+  } catch {}
+}
+
 /**
  * Generate a deterministic SHA-256 hash of a string using Web Crypto API
  */
-async function sha256Hex(message: string): Promise<string> {
+export async function sha256Hex(message: string): Promise<string> {
   try {
     const msgBuffer = new TextEncoder().encode(message);
     const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
     const hashArray = Array.from(new Uint8Array(hashBuffer));
     return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
   } catch (e) {
-    // Fallback simple hash if subtle crypto is restricted
-    let hash = 0;
-    for (let i = 0; i < message.length; i++) {
-      const char = message.charCodeAt(i);
-      hash = (hash << 5) - hash + char;
-      hash |= 0;
+    // Fallback deterministic hash if subtle crypto is restricted
+    let h1 = 0xdeadbeef ^ message.length;
+    let h2 = 0x41c6ce57 ^ message.length;
+    for (let i = 0, ch; i < message.length; i++) {
+      ch = message.charCodeAt(i);
+      h1 = Math.imul(h1 ^ ch, 2654435761);
+      h2 = Math.imul(h2 ^ ch, 1597334677);
     }
-    return 'fallback_' + Math.abs(hash).toString(16);
+    h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+    h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+    return (
+      (h2 >>> 0).toString(16).padStart(8, '0') +
+      (h1 >>> 0).toString(16).padStart(8, '0')
+    ).repeat(4);
   }
 }
 
 /**
+ * Generate random hex string using Web Crypto API
+ */
+function randomHex(bytes: number): string {
+  try {
+    return Array.from(crypto.getRandomValues(new Uint8Array(bytes)))
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('');
+  } catch {
+    let out = '';
+    for (let i = 0; i < bytes * 2; i++) {
+      out += Math.floor(Math.random() * 16).toString(16);
+    }
+    return out;
+  }
+}
+
+/**
+ * Client-side salted SHA-256 password hashing (compatible with server verifyPassword)
+ */
+async function hashPasswordClient(password: string, existingSalt?: string): Promise<{ hash: string; salt: string }> {
+  const salt = existingSalt || randomHex(16);
+  const digest = await sha256Hex(`${salt}:${password}`);
+  return {
+    hash: `sha256:${digest}`,
+    salt
+  };
+}
+
+/**
+ * Verify password against stored hash and salt on client/Firestore
+ */
+async function verifyPasswordClient(password: string, storedHash?: string, storedSalt?: string): Promise<boolean> {
+  if (!storedHash || !storedSalt) return false;
+  const digest = await sha256Hex(`${storedSalt}:${password}`);
+  if (storedHash === `sha256:${digest}` || storedHash === digest) {
+    return true;
+  }
+  return false;
+}
+
+function sanitizeClientUser(user: FirestoreAuthUserDoc): any {
+  const { passwordHash, passwordSalt, ...safe } = user;
+  return safe;
+}
+
+/**
  * Generates an invisible sub-pixel Canvas signature.
- * Different GPU drivers, anti-aliasing algorithms, and OS font-renderers produce unique image binary hashes.
  */
 function getCanvasFingerprint(): string {
   try {
@@ -62,27 +159,23 @@ function getCanvasFingerprint(): string {
     const ctx = canvas.getContext('2d');
     if (!ctx) return 'no-canvas';
 
-    // Canvas background
     ctx.textBaseline = 'top';
     ctx.font = '14px Arial, "Helvetica Neue", sans-serif';
     ctx.fillStyle = '#050811';
     ctx.fillRect(0, 0, 240, 50);
 
-    // Gradient styling
     const gradient = ctx.createLinearGradient(0, 0, 240, 0);
     gradient.addColorStop(0, '#6366f1');
     gradient.addColorStop(0.5, '#a855f7');
     gradient.addColorStop(1, '#06b6d4');
     ctx.fillStyle = gradient;
 
-    // Render characters with shadow and subpixel arcs
     ctx.shadowColor = 'rgba(168, 85, 247, 0.6)';
     ctx.shadowBlur = 6;
     ctx.shadowOffsetX = 2;
     ctx.shadowOffsetY = 2;
     ctx.fillText('AI-VIDEO-MAKER-DEV-LOCK-✨🎥', 8, 12);
 
-    // Additional arc geometry
     ctx.beginPath();
     ctx.arc(200, 25, 15, 0, Math.PI * 2, true);
     ctx.strokeStyle = '#38bdf8';
@@ -148,29 +241,29 @@ function setCookie(name: string, value: string) {
 export function getPersistentDeviceId(): string {
   let deviceId: string | null = null;
 
-  // 1. Check localStorage
   try {
     deviceId = localStorage.getItem(DEVICE_STORAGE_KEY);
   } catch {}
 
-  // 2. Check Cookie
   if (!deviceId) {
     deviceId = getCookie(DEVICE_STORAGE_KEY);
   }
 
-  // 3. Check sessionStorage
   if (!deviceId) {
     try {
       deviceId = sessionStorage.getItem(DEVICE_STORAGE_KEY);
     } catch {}
   }
 
-  // 4. Generate new if not found in any store
   if (!deviceId) {
-    const entropy = Array.from(crypto.getRandomValues(new Uint8Array(8)))
-      .map((b) => b.toString(16).padStart(2, '0'))
-      .join('');
-    deviceId = `dev_${Date.now().toString(36)}_${entropy}`;
+    const localReg = getLocalRegistry();
+    if (localReg.device?.deviceId) {
+      deviceId = localReg.device.deviceId;
+    }
+  }
+
+  if (!deviceId) {
+    deviceId = `dev_${Date.now().toString(36)}_${randomHex(8)}`;
   }
 
   // Sync across all stores
@@ -222,12 +315,13 @@ export async function computeHardwareFingerprint(): Promise<{
 }
 
 /**
- * Check if current device is registered on the backend
+ * Check if current device is registered on the backend, Firebase Firestore, or local device lock registry
  */
 export async function checkDeviceRegistrationStatus(): Promise<DeviceStatusResponse> {
   const deviceId = getPersistentDeviceId();
   const { fingerprintHash } = await computeHardwareFingerprint();
 
+  // 1. Check Backend API
   try {
     const result = await safeFetchJson<any>('/api/device/status', {
       method: 'POST',
@@ -235,21 +329,54 @@ export async function checkDeviceRegistrationStatus(): Promise<DeviceStatusRespo
       body: JSON.stringify({ deviceId, fingerprintHash })
     });
 
-    if (result.ok && result.data) {
+    if (result.ok && result.data && result.data.isRegistered) {
       const data = result.data;
-      if (data.deviceId && data.deviceId !== deviceId) {
-        // Sync reconciled device ID
-        localStorage.setItem(DEVICE_STORAGE_KEY, data.deviceId);
-        setCookie(DEVICE_STORAGE_KEY, data.deviceId);
+      const resolvedDeviceId = data.deviceId || deviceId;
+      if (resolvedDeviceId !== deviceId) {
+        try {
+          localStorage.setItem(DEVICE_STORAGE_KEY, resolvedDeviceId);
+        } catch {}
+        setCookie(DEVICE_STORAGE_KEY, resolvedDeviceId);
       }
       return {
-        isRegistered: !!data.isRegistered,
+        isRegistered: true,
         lockedUsername: data.lockedUsername || null,
-        deviceId: data.deviceId || deviceId
+        deviceId: resolvedDeviceId
       };
     }
   } catch (err) {
-    console.warn('Notice: Device status check error, fallback to offline evaluation:', err);
+    // Continue to Firestore check
+  }
+
+  // 2. Check Firebase Firestore `devices` collection
+  try {
+    const fsDevice = await getDeviceFromFirestore(deviceId, fingerprintHash);
+    if (fsDevice && fsDevice.registeredUsername) {
+      const resolvedDeviceId = fsDevice.deviceId || deviceId;
+      try {
+        localStorage.setItem(DEVICE_STORAGE_KEY, resolvedDeviceId);
+      } catch {}
+      setCookie(DEVICE_STORAGE_KEY, resolvedDeviceId);
+      saveToLocalRegistry(undefined, fsDevice);
+
+      return {
+        isRegistered: true,
+        lockedUsername: fsDevice.registeredUsername,
+        deviceId: resolvedDeviceId
+      };
+    }
+  } catch (fsErr) {
+    // Continue to local registry check
+  }
+
+  // 3. Check Local Device Lock Registry
+  const localReg = getLocalRegistry();
+  if (localReg.device && localReg.device.registeredUsername) {
+    return {
+      isRegistered: true,
+      lockedUsername: localReg.device.registeredUsername,
+      deviceId: localReg.device.deviceId || deviceId
+    };
   }
 
   return {
@@ -261,6 +388,7 @@ export async function checkDeviceRegistrationStatus(): Promise<DeviceStatusRespo
 
 /**
  * Register account for this device (First-Time Registration)
+ * Saves to Express Backend AND Firebase Firestore AND Local Device Lock Registry
  */
 export async function registerDeviceAccount(params: {
   username: string;
@@ -268,82 +396,341 @@ export async function registerDeviceAccount(params: {
   confirmPassword: string;
   contactEmail?: string;
 }): Promise<{ user: any; token: string }> {
+  const username = params.username.trim();
+  if (!username || username.length < 3) {
+    throw new Error('Username must be at least 3 characters long.');
+  }
+  if (!/^[a-zA-Z0-9_-]+$/.test(username)) {
+    throw new Error('Username may only contain letters, numbers, underscores, and hyphens.');
+  }
+  if (!params.password || params.password.length < 4) {
+    throw new Error('Password must be at least 4 characters long.');
+  }
+  if (params.password !== params.confirmPassword) {
+    throw new Error('Passwords do not match. Please verify and try again.');
+  }
+
   const deviceId = getPersistentDeviceId();
   const { fingerprintHash, hardwareProfile } = await computeHardwareFingerprint();
+  const { hash: passwordHash, salt: passwordSalt } = await hashPasswordClient(params.password);
+  const generatedUid = `usr_${randomHex(8)}`;
+  const now = new Date().toISOString();
 
-  const result = await safeFetchJson<{ user?: any; token?: string; error?: string }>('/api/auth/register-device', {
+  // Check Firestore device lock & username uniqueness first so serverless/cloud state is respected
+  let existingFsDevice: FirestoreDeviceDoc | null = null;
+  let existingFsUser: FirestoreAuthUserDoc | null = null;
+  try {
+    [existingFsDevice, existingFsUser] = await Promise.all([
+      getDeviceFromFirestore(deviceId, fingerprintHash),
+      getUserByUsernameFromFirestore(username)
+    ]);
+  } catch {
+    // Ignore network/offline errors on pre-check
+  }
+
+  // If this device is already registered in Firestore to a different user, enforce the 1-account-per-device rule
+  if (
+    existingFsDevice &&
+    existingFsDevice.registeredUsername.toLowerCase() !== username.toLowerCase()
+  ) {
+    throw new Error(
+      `This device is already permanently registered to user "${existingFsDevice.registeredUsername}". Each device is locked to only ONE account.`
+    );
+  }
+
+  // If this username is already registered in Firestore
+  if (existingFsUser) {
+    const sameDevice =
+      !existingFsUser.deviceId ||
+      existingFsUser.deviceId === deviceId ||
+      existingFsUser.deviceFingerprint === fingerprintHash;
+    const validPass = await verifyPasswordClient(
+      params.password,
+      existingFsUser.passwordHash,
+      existingFsUser.passwordSalt
+    );
+
+    if (sameDevice && validPass) {
+      // User already registered this exact account on this device — log them in cleanly
+      return await loginDeviceAccount({ username, password: params.password });
+    }
+    if (sameDevice && !validPass) {
+      throw new Error(
+        `This device is already registered to account "${existingFsUser.username}". Invalid password — please sign in with your existing password.`
+      );
+    }
+    throw new Error('This username is already taken. Please choose another username.');
+  }
+
+  // 1. Call Backend API (/api/auth/register-device)
+  const result = await safeFetchJson<{
+    user?: any;
+    token?: string;
+    deviceId?: string;
+    error?: string;
+  }>('/api/auth/register-device', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      username: params.username,
+      username,
       password: params.password,
       confirmPassword: params.confirmPassword,
       contactEmail: params.contactEmail,
       deviceId,
       fingerprintHash,
-      clientHardware: hardwareProfile
+      clientHardware: hardwareProfile,
+      passwordHash,
+      passwordSalt,
+      uid: generatedUid
     })
   });
 
-  if (!result.ok || !result.data?.token) {
+  // If backend responded with a genuine 400/403 business rule error (not an HTML 404/502 fallback)
+  if (!result.ok && !result.isHtmlFallback && (result.status === 400 || result.status === 403)) {
     throw new Error(result.data?.error || result.error || 'Failed to create account.');
   }
 
-  const data = result.data;
-  // Save session token
-  if (data.token) {
-    try {
-      localStorage.setItem(SESSION_TOKEN_KEY, data.token);
-    } catch {}
-  }
-  if (data.user) {
-    try {
-      localStorage.setItem(CACHED_USER_KEY, JSON.stringify(data.user));
-    } catch {}
+  const finalUser: FirestoreAuthUserDoc = result.ok && result.data?.user
+    ? {
+        ...result.data.user,
+        username: result.data.user.username || username,
+        passwordHash,
+        passwordSalt,
+        deviceId: result.data.deviceId || deviceId,
+        deviceFingerprint: fingerprintHash
+      }
+    : {
+        uid: generatedUid,
+        username,
+        displayName: username,
+        email: params.contactEmail?.trim() || `${username.toLowerCase()}@aivideomaker.local`,
+        passwordHash,
+        passwordSalt,
+        deviceId,
+        deviceFingerprint: fingerprintHash,
+        createdAt: now,
+        lastLoginAt: now,
+        trialStatus: 'eligible',
+        role: username.toLowerCase() === 'admin' ? 'admin' : 'user'
+      };
+
+  const finalToken =
+    result.ok && result.data?.token ? result.data.token : `sess_${randomHex(24)}`;
+
+  const finalDevice: FirestoreDeviceDoc = {
+    deviceId: finalUser.deviceId || deviceId,
+    fingerprintHash,
+    registeredUserId: finalUser.uid,
+    registeredUsername: finalUser.username || username,
+    firstRegisteredAt: now,
+    lastSeenAt: now,
+    registrationLockActive: true
+  };
+
+  const finalSession: FirestoreSessionDoc = {
+    token: finalToken,
+    userId: finalUser.uid,
+    username: finalUser.username || username,
+    deviceId: finalDevice.deviceId,
+    createdAt: now,
+    expiresAt: new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString()
+  };
+
+  // If backend was unreachable (e.g. static deployment), also check local registry for conflicts before saving
+  if (!result.ok) {
+    const localReg = getLocalRegistry();
+    if (
+      localReg.device &&
+      localReg.device.registeredUsername.toLowerCase() !== username.toLowerCase()
+    ) {
+      throw new Error(
+        `This device is already permanently registered to user "${localReg.device.registeredUsername}". Each device is locked to only ONE account.`
+      );
+    }
   }
 
-  return { user: data.user, token: data.token! };
+  // Persist to Firebase Firestore (users, devices, sessions)
+  try {
+    await Promise.all([
+      saveUserToFirestore(finalUser),
+      saveDeviceToFirestore(finalDevice),
+      saveSessionToFirestore(finalSession)
+    ]);
+  } catch (fsErr) {
+    console.warn('Notice: Background Firestore auth persistence:', fsErr);
+  }
+
+  // Persist to local registry & active session storage
+  saveToLocalRegistry(finalUser, finalDevice);
+  const cleanUser = sanitizeClientUser(finalUser);
+  try {
+    localStorage.setItem(SESSION_TOKEN_KEY, finalToken);
+    localStorage.setItem(CACHED_USER_KEY, JSON.stringify(cleanUser));
+  } catch {}
+
+  return { user: cleanUser, token: finalToken };
 }
 
 /**
  * Login on registered device (Returning User Login)
+ * Verifies against Express Backend AND Firebase Firestore AND Local Device Lock Registry
  */
 export async function loginDeviceAccount(params: {
   username: string;
   password: string;
 }): Promise<{ user: any; token: string }> {
+  const username = params.username.trim();
+  if (!username || !params.password) {
+    throw new Error('Invalid username or password. Please try again.');
+  }
+
   const deviceId = getPersistentDeviceId();
   const { fingerprintHash } = await computeHardwareFingerprint();
 
-  const result = await safeFetchJson<{ user?: any; token?: string; error?: string }>('/api/auth/login-device', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      username: params.username,
-      password: params.password,
-      deviceId,
-      fingerprintHash
-    })
-  });
+  // 1. Attempt login via Backend API (/api/auth/login-device)
+  const result = await safeFetchJson<{ user?: any; token?: string; error?: string }>(
+    '/api/auth/login-device',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        username,
+        password: params.password,
+        deviceId,
+        fingerprintHash
+      })
+    }
+  );
 
-  if (!result.ok || !result.data?.token) {
-    throw new Error(result.data?.error || result.error || 'Invalid username or password. Please try again.');
-  }
+  if (result.ok && result.data?.token && result.data?.user) {
+    const user = result.data.user;
+    const token = result.data.token;
+    const now = new Date().toISOString();
 
-  const data = result.data;
-  // Save session token
-  if (data.token) {
     try {
-      localStorage.setItem(SESSION_TOKEN_KEY, data.token);
+      localStorage.setItem(SESSION_TOKEN_KEY, token);
+      localStorage.setItem(CACHED_USER_KEY, JSON.stringify(user));
     } catch {}
-  }
-  if (data.user) {
-    try {
-      localStorage.setItem(CACHED_USER_KEY, JSON.stringify(data.user));
-    } catch {}
+
+    // Keep Firestore session & user lastLoginAt in sync
+    saveUserToFirestore({ ...user, lastLoginAt: now }).catch(() => {});
+    saveSessionToFirestore({
+      token,
+      userId: user.uid,
+      username: user.username || username,
+      deviceId: user.deviceId || deviceId,
+      createdAt: now,
+      expiresAt: new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString()
+    }).catch(() => {});
+
+    return { user, token };
   }
 
-  return { user: data.user, token: data.token! };
+  // If backend explicitly returned a Device Locked error, surface it immediately
+  if (result.data?.error && result.data.error.includes('Device locked:')) {
+    throw new Error(result.data.error);
+  }
+
+  // 2. Check Firebase Firestore & Local Registry (handles serverless cold-starts or static deployments)
+  let fsDevice: FirestoreDeviceDoc | null = null;
+  let fsUser: FirestoreAuthUserDoc | null = null;
+  try {
+    [fsDevice, fsUser] = await Promise.all([
+      getDeviceFromFirestore(deviceId, fingerprintHash),
+      getUserByUsernameFromFirestore(username)
+    ]);
+  } catch {}
+
+  const localReg = getLocalRegistry();
+  const matchedDevice = fsDevice || localReg.device;
+  const matchedUser = fsUser || localReg.users[username.toLowerCase()] || null;
+
+  // Enforce strict One-Account-Per-Device lock
+  if (
+    matchedDevice &&
+    matchedDevice.registeredUsername &&
+    matchedDevice.registeredUsername.toLowerCase() !== username.toLowerCase()
+  ) {
+    throw new Error(
+      `Device locked: This device is permanently registered to account "${matchedDevice.registeredUsername}". You cannot sign in with a different account on this device.`
+    );
+  }
+
+  if (matchedUser) {
+    const isPasswordValid = await verifyPasswordClient(
+      params.password,
+      matchedUser.passwordHash,
+      matchedUser.passwordSalt
+    );
+
+    if (!isPasswordValid) {
+      throw new Error('Invalid username or password. Please try again.');
+    }
+
+    // Check if account is locked to a different physical device
+    if (
+      matchedUser.deviceId &&
+      matchedUser.deviceId !== deviceId &&
+      matchedUser.deviceFingerprint &&
+      matchedUser.deviceFingerprint !== fingerprintHash
+    ) {
+      throw new Error(
+        `Account "${matchedUser.username}" is permanently locked to another device.`
+      );
+    }
+
+    const now = new Date().toISOString();
+    const token = `sess_${randomHex(24)}`;
+    const updatedUser: FirestoreAuthUserDoc = {
+      ...matchedUser,
+      deviceId: matchedUser.deviceId || deviceId,
+      deviceFingerprint: matchedUser.deviceFingerprint || fingerprintHash,
+      lastLoginAt: now
+    };
+    const deviceRecord: FirestoreDeviceDoc = matchedDevice || {
+      deviceId: updatedUser.deviceId || deviceId,
+      fingerprintHash,
+      registeredUserId: updatedUser.uid,
+      registeredUsername: updatedUser.username || username,
+      firstRegisteredAt: updatedUser.createdAt || now,
+      lastSeenAt: now,
+      registrationLockActive: true
+    };
+    const sessionRecord: FirestoreSessionDoc = {
+      token,
+      userId: updatedUser.uid,
+      username: updatedUser.username || username,
+      deviceId: deviceRecord.deviceId,
+      createdAt: now,
+      expiresAt: new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString()
+    };
+
+    // Sync verified account back to Express backend & Firestore
+    safeFetchJson('/api/auth/sync-device-user', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        user: updatedUser,
+        device: deviceRecord,
+        session: sessionRecord
+      })
+    }).catch(() => {});
+
+    saveUserToFirestore(updatedUser).catch(() => {});
+    saveDeviceToFirestore(deviceRecord).catch(() => {});
+    saveSessionToFirestore(sessionRecord).catch(() => {});
+    saveToLocalRegistry(updatedUser, deviceRecord);
+
+    const cleanUser = sanitizeClientUser(updatedUser);
+    try {
+      localStorage.setItem(SESSION_TOKEN_KEY, token);
+      localStorage.setItem(CACHED_USER_KEY, JSON.stringify(cleanUser));
+    } catch {}
+
+    return { user: cleanUser, token };
+  }
+
+  throw new Error('Invalid username or password. Please try again.');
 }
 
 /**
@@ -357,6 +744,7 @@ export async function checkActiveSession(): Promise<any | null> {
 
   if (!token) return null;
 
+  // 1. Check Backend API
   try {
     const result = await safeFetchJson<{ user?: any; error?: string }>('/api/auth/session', {
       headers: {
@@ -371,20 +759,29 @@ export async function checkActiveSession(): Promise<any | null> {
         localStorage.setItem(CACHED_USER_KEY, JSON.stringify(user));
       } catch {}
       return user;
-    } else if (result.status === 401 || result.status === 403) {
-      // Session expired or invalidated on server
-      try {
-        localStorage.removeItem(SESSION_TOKEN_KEY);
-        localStorage.removeItem(CACHED_USER_KEY);
-      } catch {}
     }
-  } catch (err) {
-    console.warn('Session check network error, falling back to cached profile if available:', err);
-    try {
-      const cached = localStorage.getItem(CACHED_USER_KEY);
-      if (cached) return JSON.parse(cached);
-    } catch {}
-  }
+  } catch {}
+
+  // 2. Check Firebase Firestore session
+  try {
+    const fsSession = await getSessionFromFirestore(token);
+    if (fsSession) {
+      const fsUser = await getUserFromFirestore(fsSession.userId);
+      if (fsUser) {
+        const cleanUser = sanitizeClientUser(fsUser);
+        try {
+          localStorage.setItem(CACHED_USER_KEY, JSON.stringify(cleanUser));
+        } catch {}
+        return cleanUser;
+      }
+    }
+  } catch {}
+
+  // 3. Fallback to cached user if token exists
+  try {
+    const cached = localStorage.getItem(CACHED_USER_KEY);
+    if (cached) return JSON.parse(cached);
+  } catch {}
 
   return null;
 }
@@ -408,9 +805,9 @@ export async function logoutDeviceUser(): Promise<void> {
           'x-session-token': token
         }
       });
-    } catch (e) {
-      // ignore
-    }
+    } catch {}
+
+    deleteSessionFromFirestore(token).catch(() => {});
   }
 
   try {

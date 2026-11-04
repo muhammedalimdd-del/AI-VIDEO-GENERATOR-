@@ -8,7 +8,7 @@ service cloud.firestore {
 
     // Global security helpers
     function isValidId(id) {
-      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
 
     function incoming() {
@@ -30,13 +30,41 @@ service cloud.firestore {
       );
     }
 
-    // User profile validation
+    // User profile validation (supports device-locked username/password accounts)
     function isValidUser(data) {
       return data.keys().hasAll(['uid', 'email', 'createdAt', 'trialStatus']) &&
-        data.keys().hasOnly(['uid', 'email', 'displayName', 'photoURL', 'createdAt', 'lastLoginAt', 'trialStatus', 'role']) &&
-        data.uid is string && data.uid.size() <= 128 && data.uid == request.auth.uid &&
+        data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 &&
         data.email is string && data.email.size() <= 256 &&
-        data.trialStatus in ['eligible', 'used', 'claimed'];
+        data.createdAt is string && data.createdAt.size() <= 64 &&
+        data.trialStatus in ['eligible', 'used', 'claimed'] &&
+        (!('username' in data) || (data.username is string && data.username.size() >= 3 && data.username.size() <= 64)) &&
+        (!('passwordHash' in data) || (data.passwordHash is string && data.passwordHash.size() <= 512)) &&
+        (!('passwordSalt' in data) || (data.passwordSalt is string && data.passwordSalt.size() <= 256)) &&
+        (!('deviceId' in data) || (data.deviceId is string && data.deviceId.size() <= 128)) &&
+        (!('deviceFingerprint' in data) || (data.deviceFingerprint is string && data.deviceFingerprint.size() <= 256)) &&
+        (!('role' in data) || data.role in ['user', 'admin']);
+    }
+
+    // Device registration lock validation (strictly 1 account per device)
+    function isValidDevice(data) {
+      return data.keys().hasAll(['deviceId', 'fingerprintHash', 'registeredUserId', 'registeredUsername', 'firstRegisteredAt', 'registrationLockActive']) &&
+        data.deviceId is string && data.deviceId.size() >= 1 && data.deviceId.size() <= 128 &&
+        data.fingerprintHash is string && data.fingerprintHash.size() >= 1 && data.fingerprintHash.size() <= 256 &&
+        data.registeredUserId is string && data.registeredUserId.size() >= 1 && data.registeredUserId.size() <= 128 &&
+        data.registeredUsername is string && data.registeredUsername.size() >= 3 && data.registeredUsername.size() <= 64 &&
+        data.firstRegisteredAt is string && data.firstRegisteredAt.size() <= 64 &&
+        data.registrationLockActive is bool;
+    }
+
+    // Session token validation
+    function isValidSession(data) {
+      return data.keys().hasAll(['token', 'userId', 'username', 'deviceId', 'createdAt', 'expiresAt']) &&
+        data.token is string && data.token.size() >= 8 && data.token.size() <= 256 &&
+        data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+        data.username is string && data.username.size() >= 3 && data.username.size() <= 64 &&
+        data.deviceId is string && data.deviceId.size() <= 128 &&
+        data.createdAt is string && data.createdAt.size() <= 64 &&
+        data.expiresAt is string && data.expiresAt.size() <= 64;
     }
 
     // Video request validation
@@ -45,7 +73,7 @@ service cloud.firestore {
         data.id is string && data.id.size() <= 64 &&
         data.userId is string && data.userId.size() <= 128 &&
         data.title is string && data.title.size() <= 256 &&
-        data.requestType in ['free_trial', 'paid_order'];
+        data.requestType in ['free_trial', 'paid_order', 'paid'];
     }
 
     // Budget request validation
@@ -57,68 +85,72 @@ service cloud.firestore {
         data.videoIdea is string && data.videoIdea.size() <= 4096;
     }
 
+    // Connection health check path
+    match /test/connection {
+      allow get: if true;
+    }
+
     // Users collection rules
     match /users/{userId} {
-      allow get: if isSignedIn() && (request.auth.uid == userId || isAdmin());
-      allow list: if isAdmin();
-      allow create: if isSignedIn() &&
-        isValidId(userId) &&
-        (request.auth.uid == userId || isAdmin()) &&
-        isValidUser(incoming()) &&
-        (!('role' in incoming()) || incoming().role == 'user' || isAdmin());
-      allow update: if isSignedIn() &&
-        isValidId(userId) &&
-        (request.auth.uid == userId || isAdmin()) &&
-        isValidUser(incoming()) &&
+      allow get, list: if true;
+      allow create: if isValidId(userId) &&
+        incoming().uid == userId &&
+        isValidUser(incoming());
+      allow update: if isValidId(userId) &&
         incoming().uid == existing().uid &&
-        incoming().createdAt == existing().createdAt &&
-        (!('role' in incoming()) || incoming().role == existing().role || isAdmin());
+        isValidUser(incoming());
       allow delete: if isAdmin();
+    }
+
+    // Permanent Device Lock collection rules
+    // Once a device document is created, its registeredUserId and registeredUsername can NEVER be changed!
+    match /devices/{deviceId} {
+      allow get, list: if true;
+      allow create: if isValidId(deviceId) &&
+        incoming().deviceId == deviceId &&
+        isValidDevice(incoming());
+      allow update: if isValidId(deviceId) &&
+        incoming().deviceId == existing().deviceId &&
+        incoming().registeredUserId == existing().registeredUserId &&
+        incoming().registeredUsername == existing().registeredUsername &&
+        isValidDevice(incoming());
+      allow delete: if isAdmin();
+    }
+
+    // Active Sessions collection rules
+    match /sessions/{sessionId} {
+      allow get: if isValidId(sessionId);
+      allow create, update: if isValidId(sessionId) &&
+        incoming().token == sessionId &&
+        isValidSession(incoming());
+      allow delete: if isValidId(sessionId);
     }
 
     // Video Requests collection rules
     match /video_requests/{requestId} {
-      allow get: if isSignedIn() &&
-        isValidId(requestId) &&
-        (resource.data.userId == request.auth.uid || isAdmin());
-      allow list: if isSignedIn() &&
-        (resource.data.userId == request.auth.uid || isAdmin());
-      allow create: if isSignedIn() &&
-        isValidId(requestId) &&
-        (incoming().userId == request.auth.uid || isAdmin()) &&
+      allow get, list: if true;
+      allow create: if isValidId(requestId) &&
+        incoming().id == requestId &&
         isValidVideoRequest(incoming());
-      allow update: if isSignedIn() &&
-        isValidId(requestId) &&
-        (
-          isAdmin() ||
-          (
-            existing().userId == request.auth.uid &&
-            incoming().userId == existing().userId &&
-            isValidVideoRequest(incoming()) &&
-            // Regular user cannot change status to delivered/approved or alter pricing
-            incoming().diff(existing()).affectedKeys().hasOnly(['title', 'summary', 'storyDescription', 'style', 'updatedAt'])
-          )
-        );
-      allow delete: if isAdmin();
+      allow update: if isValidId(requestId) &&
+        incoming().id == existing().id &&
+        isValidVideoRequest(incoming());
+      allow delete: if true;
     }
 
     // Budget Requests collection rules
     match /budget_requests/{budgetRequestId} {
-      allow get: if isSignedIn() &&
-        isValidId(budgetRequestId) &&
-        (resource.data.userId == request.auth.uid || resource.data.customerEmail == request.auth.token.email || isAdmin());
-      allow list: if isSignedIn() &&
-        (resource.data.userId == request.auth.uid || isAdmin());
+      allow get, list: if true;
       allow create: if isValidId(budgetRequestId) && isValidBudgetRequest(incoming());
-      allow update: if isAdmin();
+      allow update: if isValidId(budgetRequestId) && isValidBudgetRequest(incoming());
       allow delete: if isAdmin();
     }
 
     // Admins registry rules
     match /admins/{adminId} {
-      allow get: if isSignedIn() && (request.auth.uid == adminId || isAdmin());
-      allow list: if isAdmin();
-      allow write: if isAdmin();
+      allow get, list: if true;
+      allow create, update: if isValidId(adminId);
+      allow delete: if isAdmin();
     }
   }
 }

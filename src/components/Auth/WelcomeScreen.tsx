@@ -107,6 +107,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onSuccess }) => {
     }
     if (!/^[a-zA-Z0-9_-]+$/.test(trimmedUser)) {
       setErrorMessage('Username may only contain letters, numbers, underscores, and hyphens.');
+      return;
     }
     if (!password) {
       setErrorMessage('Please create a password.');
@@ -169,8 +170,12 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onSuccess }) => {
         onSuccess(result.user);
       }, 350);
     } catch (err: any) {
-      // Required exact error copy when credentials fail
-      setErrorMessage('Invalid username or password. Please try again.');
+      if (err.message && (err.message.includes('Device locked') || err.message.includes('permanently locked'))) {
+        setErrorMessage(err.message);
+      } else {
+        // Required exact error copy when credentials fail
+        setErrorMessage('Invalid username or password. Please try again.');
+      }
     } finally {
       setIsLoading(false);
     }
@@ -525,7 +530,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onSuccess }) => {
                   </div>
 
                   {/* Create Account Button */}
-                  <div className="pt-2">
+                  <div className="pt-2 space-y-2.5">
                     <button
                       type="submit"
                       disabled={isLoading}
@@ -543,6 +548,19 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onSuccess }) => {
                         </>
                       )}
                     </button>
+                    <div className="text-center">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setErrorMessage(null);
+                          setSuccessMessage(null);
+                          setAuthMode('login');
+                        }}
+                        className="text-xs text-slate-400 hover:text-cyan-300 transition-colors cursor-pointer"
+                      >
+                        Already registered on this device? <span className="font-bold text-indigo-300 underline">Sign In</span>
+                      </button>
+                    </div>
                   </div>
                 </form>
               )}
@@ -646,7 +664,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onSuccess }) => {
                   </div>
 
                   {/* Login Button */}
-                  <div className="pt-2">
+                  <div className="pt-2 space-y-2.5">
                     <button
                       type="submit"
                       disabled={isLoading}
@@ -664,6 +682,21 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onSuccess }) => {
                         </>
                       )}
                     </button>
+                    {!deviceStatus.isRegistered && (
+                      <div className="text-center">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setErrorMessage(null);
+                            setSuccessMessage(null);
+                            setAuthMode('register');
+                          }}
+                          className="text-xs text-slate-400 hover:text-cyan-300 transition-colors cursor-pointer"
+                        >
+                          First time on this device? <span className="font-bold text-emerald-400 underline">Create Account</span>
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </form>
               )}
