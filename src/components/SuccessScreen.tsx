@@ -144,6 +144,10 @@ export const SuccessScreen: React.FC<SuccessScreenProps> = ({
               <span className="text-indigo-300 font-mono text-sm">{request.customerEmail}</span>
             </div>
             <div>
+              <span className="text-slate-400 block mb-0.5">Studio Owner Notification Inbox:</span>
+              <span className="text-emerald-400 font-mono text-sm">muhammedalimdd@gmail.com</span>
+            </div>
+            <div className="sm:col-span-2">
               <span className="text-slate-400 block mb-0.5">Pricing Note:</span>
               <span className="text-slate-200">
                 {request.pricingMessage || (isTrial ? 'One-Time Free Trial' : 'The payment will be based on the video.')}
@@ -153,15 +157,44 @@ export const SuccessScreen: React.FC<SuccessScreenProps> = ({
         </div>
 
         {/* Information Box */}
-        <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 text-xs text-slate-300 flex items-start gap-3 text-left mb-8">
-          <Mail className="w-4 h-4 text-cyan-400 shrink-0 mt-0.5" />
-          <div className="space-y-1">
-            <p className="font-semibold text-white">Confirmation Email Dispatched</p>
-            <p className="text-slate-400">
-              A complete record of your submission and tracking credentials has been dispatched to{' '}
-              <strong className="text-slate-200">{request.customerEmail}</strong>.
-            </p>
+        <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 text-xs text-slate-300 flex flex-col sm:flex-row sm:items-center justify-between gap-4 text-left mb-8">
+          <div className="flex items-start gap-3">
+            <Mail className="w-4 h-4 text-cyan-400 shrink-0 mt-0.5" />
+            <div className="space-y-1">
+              <p className="font-semibold text-white">Request Routed to Studio Owner Gmail</p>
+              <p className="text-slate-400">
+                Your request notification has been dispatched to{' '}
+                <strong className="text-indigo-300 font-mono">muhammedalimdd@gmail.com</strong> and your completed video will be delivered to{' '}
+                <strong className="text-slate-200">{request.customerEmail}</strong>.
+              </p>
+            </div>
           </div>
+
+          <a
+            href={`https://mail.google.com/mail/?view=cm&fs=1&to=muhammedalimdd@gmail.com&su=${encodeURIComponent(
+              `NEW AI VIDEO REQUEST — ${(request.customerName || 'CUSTOMER').toUpperCase()} — ${request.id}`
+            )}&body=${encodeURIComponent(
+              [
+                `NEW AI VIDEO REQUEST — ${(request.customerName || 'CUSTOMER').toUpperCase()} — ${request.id}`,
+                '============================================================',
+                `Customer Name: ${request.customerName}`,
+                `Customer Email: ${request.customerEmail}`,
+                `Request ID: ${request.id}`,
+                `Video Title: ${request.title}`,
+                `Request Type: ${isTrial ? 'One-Time Free Trial' : 'Paid Video Request'}`,
+                `Style: ${request.style || 'Cinematic'}`,
+                `Format: ${request.format || 'Landscape'} (${request.aspectRatio || '16:9'})`,
+                `Duration: ${request.duration || 'Standard'}`,
+                `Submitted At: ${new Date(request.createdAt).toUTCString()}`
+              ].join('\n')
+            )}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="shrink-0 px-3.5 py-2 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-300 font-semibold text-xs flex items-center gap-1.5 transition-colors"
+          >
+            <Mail className="w-3.5 h-3.5" />
+            <span>Open in Gmail</span>
+          </a>
         </div>
 
         {/* Action Buttons */}

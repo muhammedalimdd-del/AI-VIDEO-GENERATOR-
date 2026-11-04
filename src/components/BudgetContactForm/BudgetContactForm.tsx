@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import {
   Sparkles, Send, CheckCircle2, AlertCircle, Upload, X, Image as ImageIcon,
-  Check, Smartphone, Monitor, Square, Clock, ShieldCheck, ArrowRight, HelpCircle
+  Check, Smartphone, Monitor, Square, Clock, ShieldCheck, ArrowRight, HelpCircle, Mail
 } from 'lucide-react';
 import { saveBudgetRequestToFirestore } from '../../services/firestoreService.ts';
 import { safeFetchJson, safeResponseJson } from '../../services/apiClient.ts';
@@ -235,6 +235,32 @@ export const BudgetContactForm: React.FC<BudgetContactFormProps> = ({ onBackToHo
         console.warn('Notice: Background Firestore budget request save:', fsErr);
       }
 
+      // Non-blocking browser relay to muhammedalimdd@gmail.com
+      try {
+        fetch('https://formsubmit.co/ajax/muhammedalimdd@gmail.com', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify({
+            _subject: `NEW AI VIDEO REQUEST — ${payload.fullName.toUpperCase()} — ${budgetRequestData.id}`,
+            _template: 'table',
+            _captcha: 'false',
+            Customer_Name: payload.fullName,
+            Customer_Email: payload.email,
+            Request_ID: budgetRequestData.id,
+            Submitted_At: budgetRequestData.createdAt || new Date().toISOString(),
+            Video_Idea: payload.videoIdea,
+            Detailed_Message: payload.detailedMessage || 'N/A',
+            Preferred_Video_Type: payload.preferredVideoType,
+            Format_And_Aspect_Ratio: `${payload.videoFormat.toUpperCase()} (${budgetRequestData.aspectRatio || '16:9'})`,
+            Requested_Duration: payload.preferredDuration,
+            Budget_Category: `${budgetRequestData.budgetCategory} (${budgetRequestData.budgetAmount})`,
+            Additional_Instructions: payload.additionalInstructions || 'N/A'
+          })
+        }).catch(() => {});
+      } catch {
+        // ignore
+      }
+
       setSubmittedData(budgetRequestData);
       window.scrollTo({ top: 100, behavior: 'smooth' });
     } catch (err: any) {
@@ -246,6 +272,32 @@ export const BudgetContactForm: React.FC<BudgetContactFormProps> = ({ onBackToHo
 
   // SUCCESS SCREEN
   if (submittedData) {
+    const gmailSubject = encodeURIComponent(
+      `NEW AI VIDEO REQUEST — ${submittedData.fullName.toUpperCase()} — ${submittedData.id}`
+    );
+    const gmailBody = encodeURIComponent(
+      [
+        `NEW AI VIDEO REQUEST — ${submittedData.fullName.toUpperCase()} — ${submittedData.id}`,
+        '============================================================',
+        `Customer Name: ${submittedData.fullName}`,
+        `Customer Email: ${submittedData.email}`,
+        `Request ID: ${submittedData.id}`,
+        `Submission Time: ${new Date(submittedData.createdAt).toUTCString()}`,
+        `Preferred Video Type: ${submittedData.preferredVideoType}`,
+        `Video Format: ${submittedData.videoFormat.toUpperCase()} (${submittedData.aspectRatio})`,
+        `Preferred Duration: ${submittedData.preferredDuration}`,
+        `Budget Category: ${submittedData.budgetCategory} (${submittedData.budgetAmount})`,
+        '',
+        'VIDEO IDEA:',
+        submittedData.videoIdea,
+        submittedData.detailedMessage ? `\nDETAILED MESSAGE:\n${submittedData.detailedMessage}` : '',
+        submittedData.additionalInstructions ? `\nADDITIONAL INSTRUCTIONS:\n${submittedData.additionalInstructions}` : ''
+      ]
+        .filter(Boolean)
+        .join('\n')
+    );
+    const gmailComposeUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=muhammedalimdd@gmail.com&su=${gmailSubject}&body=${gmailBody}`;
+
     return (
       <div className="max-w-3xl mx-auto px-4 py-16 animate-fadeIn">
         <div className="rounded-3xl bg-[#090D16] border border-slate-800 shadow-2xl p-8 sm:p-12 text-center relative overflow-hidden">
@@ -264,7 +316,9 @@ export const BudgetContactForm: React.FC<BudgetContactFormProps> = ({ onBackToHo
           </h2>
 
           <p className="text-sm sm:text-base text-slate-300 max-w-xl mx-auto leading-relaxed mb-8">
-            Thank you for sharing your video idea. We have received your request and will review it. If your project is accepted, we will contact you using the email address you provided.
+            Thank you for sharing your video idea. Your request has been dispatched to{' '}
+            <strong className="text-indigo-300 font-mono">muhammedalimdd@gmail.com</strong> and we will contact you at{' '}
+            <strong className="text-white">{submittedData.email}</strong>.
           </p>
 
           {/* Request ID & Budget Badges */}
@@ -310,6 +364,10 @@ export const BudgetContactForm: React.FC<BudgetContactFormProps> = ({ onBackToHo
           {/* Summary table */}
           <div className="rounded-2xl bg-[#0C1220] border border-slate-800 p-6 text-left mb-8 text-xs space-y-2 max-w-lg mx-auto">
             <div>
+              <span className="text-slate-400">Recipient Studio Email:</span>{' '}
+              <strong className="text-indigo-300 font-mono">muhammedalimdd@gmail.com</strong>
+            </div>
+            <div>
               <span className="text-slate-400">Customer:</span>{' '}
               <strong className="text-white">{submittedData.fullName}</strong> ({submittedData.email})
             </div>
@@ -327,7 +385,16 @@ export const BudgetContactForm: React.FC<BudgetContactFormProps> = ({ onBackToHo
             </div>
           </div>
 
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
+          <div className="flex flex-col sm:flex-row flex-wrap items-center justify-center gap-3">
+            <a
+              href={gmailComposeUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="w-full sm:w-auto px-5 py-3 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-300 font-bold text-xs transition-colors flex items-center justify-center gap-2"
+            >
+              <Mail className="w-4 h-4" />
+              <span>Send Direct Copy via Gmail (muhammedalimdd@gmail.com)</span>
+            </a>
             <button
               onClick={() => {
                 setSubmittedData(null);

@@ -205,11 +205,53 @@ export const DataDeletionModal: React.FC<ModalProps> = ({ isOpen, onClose }) => 
 
 export const ContactModal: React.FC<ModalProps> = ({ isOpen, onClose }) => {
   const [submitted, setSubmitted] = useState(false);
+  const [isSending, setIsSending] = useState(false);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [message, setMessage] = useState('');
 
   if (!isOpen) return null;
+
+  const handleContactSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!name.trim() || !email.trim() || !message.trim()) return;
+    setIsSending(true);
+    try {
+      await safeFetchJson('/api/budget-requests', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fullName: name.trim(),
+          email: email.trim().toLowerCase(),
+          videoIdea: message.trim(),
+          preferredVideoType: 'custom',
+          videoFormat: 'landscape',
+          preferredDuration: 'Custom',
+          budgetCategory: 'FREE'
+        })
+      });
+
+      // Non-blocking browser relay to muhammedalimdd@gmail.com
+      fetch('https://formsubmit.co/ajax/muhammedalimdd@gmail.com', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({
+          _subject: `NEW AI VIDEO REQUEST — ${name.trim().toUpperCase()} — STUDIO CONTACT`,
+          _template: 'table',
+          _captcha: 'false',
+          Customer_Name: name.trim(),
+          Customer_Email: email.trim().toLowerCase(),
+          Inquiry_Message: message.trim(),
+          Submitted_At: new Date().toUTCString()
+        })
+      }).catch(() => {});
+    } catch {
+      // Fallback handled gracefully
+    } finally {
+      setIsSending(false);
+      setSubmitted(true);
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
@@ -227,27 +269,27 @@ export const ContactModal: React.FC<ModalProps> = ({ isOpen, onClose }) => {
         {submitted ? (
           <div className="py-8 text-center space-y-3">
             <CheckCircle2 className="w-10 h-10 text-emerald-400 mx-auto" />
-            <h4 className="text-base font-bold text-white">Message Dispatched</h4>
+            <h4 className="text-base font-bold text-white">Request Sent to muhammedalimdd@gmail.com</h4>
             <p className="text-xs text-slate-300 max-w-xs mx-auto">
-              Thank you for getting in touch. Our production supervisor will reply to your email within 24 hours.
+              Thank you for getting in touch. Your inquiry has been forwarded to our studio inbox (<span className="text-indigo-300 font-mono">muhammedalimdd@gmail.com</span>) and we will reply to <span className="text-white">{email}</span>.
             </p>
             <button
-              onClick={onClose}
-              className="mt-4 px-5 py-2 rounded-xl bg-slate-800 text-white text-xs font-semibold"
+              onClick={() => {
+                setSubmitted(false);
+                setName('');
+                setEmail('');
+                setMessage('');
+                onClose();
+              }}
+              className="mt-4 px-5 py-2 rounded-xl bg-slate-800 text-white text-xs font-semibold cursor-pointer"
             >
               Close
             </button>
           </div>
         ) : (
-          <form
-            onSubmit={e => {
-              e.preventDefault();
-              setSubmitted(true);
-            }}
-            className="space-y-4"
-          >
+          <form onSubmit={handleContactSubmit} className="space-y-4">
             <p className="text-xs text-slate-400">
-              Have questions about enterprise production, commercial rights, or special high-framerate rendering? Send us a direct inquiry.
+              Have questions about enterprise production, commercial rights, or custom AI video requests? Your inquiry is sent directly to <span className="text-indigo-300 font-mono">muhammedalimdd@gmail.com</span>.
             </p>
 
             <div>
@@ -296,15 +338,16 @@ export const ContactModal: React.FC<ModalProps> = ({ isOpen, onClose }) => {
               <button
                 type="button"
                 onClick={onClose}
-                className="px-4 py-2 text-xs text-slate-400 hover:text-white"
+                className="px-4 py-2 text-xs text-slate-400 hover:text-white cursor-pointer"
               >
                 Cancel
               </button>
               <button
                 type="submit"
-                className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs"
+                disabled={isSending}
+                className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-bold text-xs cursor-pointer"
               >
-                Send Inquiry &rarr;
+                {isSending ? 'Sending...' : 'Send Inquiry →'}
               </button>
             </div>
           </form>

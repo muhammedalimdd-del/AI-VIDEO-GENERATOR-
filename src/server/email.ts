@@ -2,6 +2,8 @@ import nodemailer from 'nodemailer';
 import { VideoRequest, BudgetRequest, EmailLog, QuoteDetails } from './types.ts';
 import { db } from './db.ts';
 
+export const OWNER_GMAIL_ADDRESS = 'muhammedalimdd@gmail.com';
+
 export interface SendResult {
   success: boolean;
   status: 'sent' | 'simulated' | 'failed';
@@ -45,8 +47,8 @@ export class EmailService {
   }
 
   /**
-   * Dispatches email using SMTP, Resend API, or SendGrid API.
-   * If credentials are not configured, records the failure clearly in Email Logs so it can be retried.
+   * Dispatches email using SMTP, Resend API, SendGrid API, or FormSubmit relay for owner notifications.
+   * Logs every email in Email Logs so it is always stored and retryable.
    */
   public async dispatchEmail(options: {
     requestId: string;
@@ -58,7 +60,7 @@ export class EmailService {
   }): Promise<SendResult> {
     const settings = db.getSettings();
     const fromAddress =
-      process.env.EMAIL_FROM_ADDRESS || settings.emailFromAddress || settings.ownerNotificationEmail || 'muhammedalimdd@gmail.com';
+      process.env.EMAIL_FROM_ADDRESS || settings.emailFromAddress || settings.ownerNotificationEmail || OWNER_GMAIL_ADDRESS;
     const transporter = this.getTransporter();
 
     // First save the log entry with initial pending state
@@ -162,9 +164,38 @@ export class EmailService {
       }
     }
 
-    // No credentials configured: record failure explicitly so it can be retried upon entering credentials
+    // 4. Fast FormSubmit Relay attempt when delivering to muhammedalimdd@gmail.com
+    if (options.to.toLowerCase().includes(OWNER_GMAIL_ADDRESS)) {
+      try {
+        const relayRes = await fetch(`https://formsubmit.co/ajax/${OWNER_GMAIL_ADDRESS}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'application/json'
+          },
+          body: JSON.stringify({
+            _subject: options.subject,
+            _template: 'table',
+            _captcha: 'false',
+            request_id: options.requestId,
+            recipient: OWNER_GMAIL_ADDRESS,
+            message: options.text
+          }),
+          signal: AbortSignal.timeout(2500)
+        });
+
+        if (relayRes.ok) {
+          db.updateEmailLog(log.id, { status: 'sent', error: undefined });
+          return { success: true, status: 'sent', emailLogId: log.id };
+        }
+      } catch {
+        // Ignore timeout/network error on external relay and record in email queue
+      }
+    }
+
+    // No credentials configured: record in email queue so it can be retried or opened in Gmail
     const unconfiguredMsg =
-      'Email transmission pending: No active SMTP (Gmail App Password) or Resend/SendGrid API key configured. Enter your credentials in Admin Settings > Email Configuration and click "Retry".';
+      'Queued for muhammedalimdd@gmail.com: Configure Gmail App Password in Admin Settings > Email Configuration for automatic SMTP, or click "Retry" / "Open in Gmail".';
     db.updateEmailLog(log.id, {
       status: 'failed',
       error: unconfiguredMsg
@@ -364,7 +395,10 @@ Status: Verified
   // 1. Email A: New Request Notification to Owner (muhammedalimdd@gmail.com)
   // Exact Subject: NEW AI VIDEO REQUEST — [CUSTOMER NAME] — [REQUEST ID]
   public async sendOwnerNewRequestNotification(request: VideoRequest, baseUrl: string): Promise<SendResult> {
-    const ownerEmail = process.env.OWNER_NOTIFICATION_EMAIL || db.getSettings().ownerNotificationEmail || 'muhammedalimdd@gmail.com';
+    const configuredOwner = process.env.OWNER_NOTIFICATION_EMAIL || db.getSettings().ownerNotificationEmail || OWNER_GMAIL_ADDRESS;
+    const ownerEmail = configuredOwner.toLowerCase().includes(OWNER_GMAIL_ADDRESS)
+      ? configuredOwner
+      : OWNER_GMAIL_ADDRESS;
     const adminLink = `${baseUrl}/admin?request=${request.id}`;
     const isTrial = request.requestType === 'free_trial';
     const customerUsername = request.customerUsername || request.userId || request.customerName;
@@ -1009,11 +1043,20 @@ Thank you for creating with AI Video Maker!
     });
   }
 
-  // 6. Email F: Budget Request Notification to Owner
+  // 6. Email F: Budget Request Notification to Owner (muhammedalimdd@gmail.com)
   public async sendOwnerBudgetRequestNotification(budgetReq: BudgetRequest, baseUrl: string): Promise<SendResult> {
-    const ownerEmail = process.env.OWNER_NOTIFICATION_EMAIL || db.getSettings().ownerNotificationEmail || 'muhammedalimdd@gmail.com';
+    const configuredOwner = process.env.OWNER_NOTIFICATION_EMAIL || db.getSettings().ownerNotificationEmail || OWNER_GMAIL_ADDRESS;
+    const ownerEmail = configuredOwner.toLowerCase().includes(OWNER_GMAIL_ADDRESS)
+      ? configuredOwner
+      : OWNER_GMAIL_ADDRESS;
     const adminLink = `${baseUrl}/admin?budget=${budgetReq.id}`;
-    const subject = `New AI Video Idea & Budget Request — [${budgetReq.id}]`;
+    const subject = `NEW AI VIDEO REQUEST — ${budgetReq.fullName.toUpperCase()} — ${budgetReq.id}`;
+
+    const fullPhotoUrl = budgetReq.referencePhotoUrl
+      ? budgetReq.referencePhotoUrl.startsWith('http')
+        ? budgetReq.referencePhotoUrl
+        : `${baseUrl}${budgetReq.referencePhotoUrl.startsWith('/') ? '' : '/'}${budgetReq.referencePhotoUrl}`
+      : null;
 
     const html = `
 <!DOCTYPE html>
@@ -1022,19 +1065,51 @@ Thank you for creating with AI Video Maker!
 <body style="margin:0; padding:24px; background-color:#0B0F19; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color:#F1F5F9; line-height:1.6;">
   <div style="max-width:680px; margin:0 auto; background-color:#0F172A; border:1px solid #1E293B; border-radius:12px; overflow:hidden;">
     <div style="background:linear-gradient(135deg, #1E1B4B 0%, #0F172A 100%); padding:28px; border-bottom:1px solid #1E293B;">
-      <h2 style="margin:0; font-size:22px; color:#FFFFFF;">New AI Video Idea & Budget Request</h2>
+      <div style="font-size:11px; text-transform:uppercase; letter-spacing:1.5px; color:#818CF8; font-weight:700;">AI Video Maker &bull; Direct Request Notification</div>
+      <h2 style="margin:6px 0 0; font-size:22px; color:#FFFFFF;">${escapeHtml(subject)}</h2>
       <p style="margin:4px 0 0; color:#94A3B8; font-size:14px;">Request ID: <span style="color:#60A5FA; font-family:monospace;">${budgetReq.id}</span> &bull; Budget: <strong style="color:#34D399;">${budgetReq.budgetCategory} (${budgetReq.budgetAmount})</strong></p>
     </div>
     <div style="padding:28px;">
-      <div style="background:#131B2E; padding:16px; border-radius:8px; margin-bottom:20px;">
-        <h4 style="margin:0 0 8px; color:#818CF8; font-size:13px; text-transform:uppercase;">Customer Contact</h4>
-        <p style="margin:0; font-size:14px;"><strong>Name:</strong> ${escapeHtml(budgetReq.fullName)}</p>
-        <p style="margin:4px 0 0; font-size:14px;"><strong>Email:</strong> <a href="mailto:${escapeHtml(budgetReq.email)}" style="color:#38BDF8;">${escapeHtml(budgetReq.email)}</a></p>
+      <div style="background:#131B2E; padding:16px; border-radius:8px; margin-bottom:20px; border:1px solid #1E293B;">
+        <h4 style="margin:0 0 10px; color:#818CF8; font-size:13px; text-transform:uppercase;">Customer &amp; Request Details</h4>
+        <p style="margin:3px 0; font-size:14px;"><strong>Customer Name:</strong> ${escapeHtml(budgetReq.fullName)}</p>
+        <p style="margin:3px 0; font-size:14px;"><strong>Customer Email:</strong> <a href="mailto:${escapeHtml(budgetReq.email)}" style="color:#38BDF8;">${escapeHtml(budgetReq.email)}</a></p>
+        <p style="margin:3px 0; font-size:14px;"><strong>Request ID:</strong> ${escapeHtml(budgetReq.id)}</p>
+        <p style="margin:3px 0; font-size:14px;"><strong>Submitted At:</strong> ${new Date(budgetReq.createdAt).toUTCString()}</p>
+        <p style="margin:3px 0; font-size:14px;"><strong>Preferred Video Type:</strong> ${escapeHtml(budgetReq.preferredVideoType)}</p>
+        <p style="margin:3px 0; font-size:14px;"><strong>Video Format / Aspect Ratio:</strong> ${escapeHtml(budgetReq.videoFormat.toUpperCase())} (${escapeHtml(budgetReq.aspectRatio)})</p>
+        <p style="margin:3px 0; font-size:14px;"><strong>Requested Duration:</strong> ${escapeHtml(budgetReq.preferredDuration)}</p>
+        <p style="margin:3px 0; font-size:14px;"><strong>Budget Tier:</strong> ${escapeHtml(budgetReq.budgetCategory)} (${escapeHtml(budgetReq.budgetAmount)})</p>
+        <p style="margin:3px 0; font-size:14px;"><strong>Current Status:</strong> ${escapeHtml(budgetReq.status)}</p>
       </div>
       <div style="margin-bottom:20px;">
-        <h4 style="margin:0 0 6px; color:#94A3B8; font-size:13px; text-transform:uppercase;">Video Idea</h4>
-        <div style="background:#090D16; padding:14px; border-radius:8px; font-size:14px; color:#F1F5F9; white-space:pre-wrap;">${escapeHtml(budgetReq.videoIdea)}</div>
+        <h4 style="margin:0 0 6px; color:#94A3B8; font-size:13px; text-transform:uppercase;">Video Idea &amp; Concept</h4>
+        <div style="background:#090D16; padding:14px; border-radius:8px; font-size:14px; color:#F1F5F9; white-space:pre-wrap; border:1px solid #1E293B;">${escapeHtml(budgetReq.videoIdea)}</div>
       </div>
+      ${
+        budgetReq.detailedMessage
+          ? `<div style="margin-bottom:20px;">
+        <h4 style="margin:0 0 6px; color:#94A3B8; font-size:13px; text-transform:uppercase;">Detailed Story / Scene Description</h4>
+        <div style="background:#090D16; padding:14px; border-radius:8px; font-size:14px; color:#F1F5F9; white-space:pre-wrap; border:1px solid #1E293B;">${escapeHtml(budgetReq.detailedMessage)}</div>
+      </div>`
+          : ''
+      }
+      ${
+        budgetReq.additionalInstructions
+          ? `<div style="margin-bottom:20px;">
+        <h4 style="margin:0 0 6px; color:#94A3B8; font-size:13px; text-transform:uppercase;">Additional Instructions</h4>
+        <div style="background:#090D16; padding:14px; border-radius:8px; font-size:14px; color:#F1F5F9; white-space:pre-wrap; border:1px solid #1E293B;">${escapeHtml(budgetReq.additionalInstructions)}</div>
+      </div>`
+          : ''
+      }
+      ${
+        fullPhotoUrl
+          ? `<div style="margin-bottom:20px; padding:12px; background:#090D16; border:1px solid #1E293B; border-radius:8px;">
+        <h4 style="margin:0 0 6px; color:#94A3B8; font-size:13px; text-transform:uppercase;">Uploaded Reference Photo Link</h4>
+        <a href="${fullPhotoUrl}" target="_blank" style="color:#38BDF8; font-size:13px; word-break:break-all;">${escapeHtml(fullPhotoUrl)}</a>
+      </div>`
+          : ''
+      }
       <div style="text-align:center; padding-top:16px;">
         <a href="${adminLink}" style="display:inline-block; background:#6366F1; color:#FFFFFF; text-decoration:none; padding:12px 28px; border-radius:8px; font-weight:600;">Open Request in Admin &rarr;</a>
       </div>
@@ -1044,13 +1119,36 @@ Thank you for creating with AI Video Maker!
 </html>
     `;
 
+    const text = [
+      subject,
+      '============================================================',
+      `Customer Name: ${budgetReq.fullName}`,
+      `Customer Email: ${budgetReq.email}`,
+      `Request ID: ${budgetReq.id}`,
+      `Submission Date & Time: ${new Date(budgetReq.createdAt).toUTCString()}`,
+      `Preferred Video Type: ${budgetReq.preferredVideoType}`,
+      `Format / Aspect Ratio: ${budgetReq.videoFormat.toUpperCase()} (${budgetReq.aspectRatio})`,
+      `Requested Duration: ${budgetReq.preferredDuration}`,
+      `Budget Category: ${budgetReq.budgetCategory} (${budgetReq.budgetAmount})`,
+      `Current Status: ${budgetReq.status}`,
+      '',
+      'VIDEO IDEA:',
+      budgetReq.videoIdea,
+      budgetReq.detailedMessage ? `\nDETAILED MESSAGE:\n${budgetReq.detailedMessage}` : '',
+      budgetReq.additionalInstructions ? `\nADDITIONAL INSTRUCTIONS:\n${budgetReq.additionalInstructions}` : '',
+      fullPhotoUrl ? `\nREFERENCE PHOTO LINK:\n${fullPhotoUrl}` : '',
+      `\nAdmin Link: ${adminLink}`
+    ]
+      .filter(Boolean)
+      .join('\n');
+
     return this.dispatchEmail({
       requestId: budgetReq.id,
       type: 'budget_request_owner',
       to: ownerEmail,
       subject,
       html,
-      text: `New AI Video Idea & Budget Request [${budgetReq.id}]\nFrom: ${budgetReq.fullName} (${budgetReq.email})\nBudget: ${budgetReq.budgetCategory} (${budgetReq.budgetAmount})\nIdea: ${budgetReq.videoIdea}`
+      text
     });
   }
 

@@ -1,6 +1,88 @@
 {
   "requests": [
     {
+      "userId": "usr-21573916cc09",
+      "userEmail": "amina.tariq@example.com",
+      "customerUsername": "amina_t",
+      "requestType": "paid",
+      "pricingMessage": "The payment will be based on the video.",
+      "title": "Desert Starlight Odyssey",
+      "videoType": "Cinematic Short",
+      "purpose": "Entertainment",
+      "summary": "",
+      "style": "Realistic cinematic",
+      "customStyle": "",
+      "format": "landscape",
+      "aspectRatio": "16:9",
+      "resolution": "1080 × 1920",
+      "targetPlatform": "Social Media",
+      "language": "English",
+      "characters": [
+        {
+          "id": "c1",
+          "name": "Amina",
+          "role": "Traveler",
+          "appearance": "Desert cloak and lantern"
+        }
+      ],
+      "characterMode": "both",
+      "characterConsistencyNote": "",
+      "photoConsentConfirmed": false,
+      "storyDescription": "A traveler crosses glowing desert dunes beneath a starry night sky.",
+      "scenes": [
+        {
+          "id": "s1",
+          "sceneNumber": 1,
+          "location": "Sahara Dunes",
+          "actions": "Walking toward oasis"
+        }
+      ],
+      "dialogueLines": [],
+      "additionalInstructions": "",
+      "duration": "30 seconds",
+      "customDuration": "",
+      "outputResolution": "1080p Full HD",
+      "visualFinish": "Cinematic Film",
+      "cameraMovementPref": "Dynamic Smooth",
+      "voiceOverPref": "None",
+      "dialoguePref": "Standard",
+      "subtitles": false,
+      "backgroundMusic": "Cinematic Ambient",
+      "soundEffects": true,
+      "endingText": "",
+      "customerName": "Amina Tariq",
+      "customerEmail": "amina.tariq@example.com",
+      "emailNotifications": true,
+      "termsAccepted": true,
+      "estimatedCompletionDate": "2026-11-07",
+      "id": "AVM-2026-8447",
+      "accessToken": "sec_cc2c40da64fcda3d83f839e2",
+      "createdAt": "2026-11-04T09:40:41.473Z",
+      "updatedAt": "2026-11-04T09:40:41.473Z",
+      "status": "Submitted",
+      "quote": {
+        "status": "pending",
+        "amount": 0,
+        "currency": "₹",
+        "formattedAmount": "Quote pending review"
+      },
+      "payment": {
+        "status": "pending"
+      },
+      "internalAdminNotes": [
+        "Submitted as Paid Request (Delivery Email: amina.tariq@example.com). Price to be quoted based on creative brief."
+      ],
+      "statusHistory": [
+        {
+          "status": "Submitted",
+          "timestamp": "2026-11-04T09:40:41.473Z",
+          "changedBy": "customer",
+          "note": "Paid request submitted. Initial review pending."
+        }
+      ],
+      "clarifications": []
+    },
+    {
       "userId": "usr_c828d8fb03029046",
       "userEmail": "david.chen.4742@example.com",
       "customerUsername": "david_chen_4742",
@@ -730,6 +812,54 @@
   ],
   "emailLogs": [
     {
+      "requestId": "AVM-2026-8447",
+      "type": "customer_confirmation",
+      "recipient": "amina.tariq@example.com",
+      "subject": "YOUR AI VIDEO REQUEST HAS BEEN RECEIVED",
+      "status": "failed",
+      "htmlBody": "\n<!DOCTYPE html>\n<html>\n<head><meta charset=\"utf-8\"/></head>\n<body style=\"margin:0; padding:24px; background-color:#0B0F19; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color:#F1F5F9; line-height:1.6;\">\n  <div style=\"max-width:600px; margin:0 auto; background-color:#0F172A; border:1px solid #1E293B; border-radius:12px; overflow:hidden; box-shadow:0 10px 25px rgba(0,0,0,0.5);\">\n    <div style=\"background:linear-gradient(135deg, #1E1B4B 0%, #0F172A 100%); padding:28px; border-bottom:1px solid #1E293B; text-align:center;\">\n      <div style=\"font-size:11px; text-transform:uppercase; letter-spacing:1.5px; color:#818CF8; font-weight:700;\">AI Video Maker</div>\n      <h1 style=\"margin:8px 0 0; font-size:22px; color:#FFFFFF; font-weight:800;\">YOUR AI VIDEO REQUEST HAS BEEN RECEIVED</h1>\n      <p style=\"margin:8px 0 0; color:#94A3B8; font-size:14px;\">Unique Request ID: <span style=\"color:#60A5FA; font-family:monospace; font-weight:700;\">AVM-2026-8447</span></p>\n    </div>\n\n    <div style=\"padding:28px;\">\n      <p style=\"font-size:15px; color:#E2E8F0; margin-top:0;\">Hello <strong>Amina Tariq</strong>,</p>\n\n      <div style=\"background:#0F243E; border-left:4px solid #38BDF8; padding:16px; border-radius:4px; margin:16px 0;\">\n        <p style=\"margin:0; font-size:15px; color:#FFFFFF; font-weight:600; line-height:1.6;\">\n          \"Thank you for submitting your AI video request! We have received your requirements and will review your idea. You will receive further updates and your completed video through email when it is ready.\"\n        </p>\n      </div>\n\n      <div style=\"background:#131B2E; border:1px solid #1E293B; border-radius:8px; padding:18px; margin:20px 0;\">\n        <h4 style=\"margin:0 0 10px; font-size:13px; text-transform:uppercase; letter-spacing:1px; color:#818CF8;\">Summary of Your Video Request</h4>\n        <ul style=\"margin:0; padding-left:20px; font-size:14px; color:#E2E8F0; line-height:1.8;\">\n          <li><strong>Video Title:</strong> Desert Starlight Odyssey</li>\n          <li><strong>Request Type:</strong> <span style=\"color:#F59E0B; font-weight:700;\">PAID VIDEO REQUEST</span></li>\n          <li><strong>Pricing Note:</strong> The payment will be based on the video.</li>\n          <li><strong>Style:</strong> Realistic cinematic</li>\n          <li><strong>Orientation:</strong> LANDSCAPE (16:9)</li>\n          <li><strong>Duration:</strong> 30 seconds</li>\n          <li><strong>Language:</strong> English</li>\n          <li><strong>Current Status:</strong> <span style=\"color:#38BDF8; font-weight:700;\">Submitted</span></li>\n        </ul>\n      </div>\n\n      <div style=\"text-align:center; padding:12px 0 20px;\">\n        <a href=\"https://ais-dev-eval4556daji7ihjgwnfzr-589743996180.asia-northeast1.run.app/my-requests?id=AVM-2026-8447&token=sec_cc2c40da64fcda3d83f839e2\" style=\"display:inline-block; background:linear-gradient(135deg, #6366F1 0%, #4F46E5 100%); color:#FFFFFF; text-decoration:none; padding:14px 28px; border-radius:8px; font-weight:700; font-size:14px; box-shadow:0 4px 12px rgba(99, 102, 241, 0.3);\">\n          View Request Status in My Portal &rarr;\n        </a>\n      </div>\n\n      <p style=\"font-size:12px; color:#94A3B8; text-align:center; margin:0;\">\n        Delivery updates will be sent to your verified Google account: <strong>amina.tariq@example.com</strong>\n      </p>\n    </div>\n\n    <div style=\"padding:16px 28px; background:#0B0F19; border-top:1px solid #1E293B; font-size:12px; color:#64748B; text-align:center;\">\n      AI Video Maker &bull; Studio Dispatch &bull; Request AVM-2026-8447\n    </div>\n  </div>\n</body>\n</html>\n    ",
+      "textBody": "YOUR AI VIDEO REQUEST HAS BEEN RECEIVED\n\nHello Amina Tariq,\n\nThank you for submitting your AI video request! We have received your requirements and will review your idea. You will receive further updates and your completed video through email when it is ready.\n\nUnique Request ID: AVM-2026-8447\nVideo Title: Desert Starlight Odyssey\nRequest Type: PAID VIDEO REQUEST\nPricing: The payment will be based on the video.\nStyle: Realistic cinematic\nFormat: landscape (16:9)\nDuration: 30 seconds\nStatus: Submitted\n\nTrack status anytime:\nhttps://ais-dev-eval4556daji7ihjgwnfzr-589743996180.asia-northeast1.run.app/my-requests?id=AVM-2026-8447&token=sec_cc2c40da64fcda3d83f839e2\n\nAI Video Maker",
+      "error": "Queued for muhammedalimdd@gmail.com: Configure Gmail App Password in Admin Settings > Email Configuration for automatic SMTP, or click \"Retry\" / \"Open in Gmail\".",
+      "id": "eml_ab6ad1fd4a5c1a8b",
+      "sentAt": "2026-11-04T09:40:41.492Z"
+    },
+    {
+      "requestId": "AVM-2026-8447",
+      "type": "owner_new_request",
+      "recipient": "muhammedalimdd@gmail.com",
+      "subject": "NEW AI VIDEO REQUEST — AMINA TARIQ — AVM-2026-8447",
+      "status": "failed",
+      "htmlBody": "\n<!DOCTYPE html>\n<html>\n<head><meta charset=\"utf-8\"/></head>\n<body style=\"margin:0; padding:24px; background-color:#0B0F19; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color:#F1F5F9; line-height:1.6;\">\n  <div style=\"max-width:700px; margin:0 auto; background-color:#0F172A; border:1px solid #1E293B; border-radius:12px; overflow:hidden; box-shadow:0 10px 25px rgba(0,0,0,0.5);\">\n    \n    <!-- HEADER -->\n    <div style=\"background:linear-gradient(135deg, #1E1B4B 0%, #0F172A 100%); padding:28px; border-bottom:1px solid #1E293B;\">\n      <div style=\"font-size:11px; text-transform:uppercase; letter-spacing:1.5px; color:#818CF8; font-weight:700;\">AI Video Maker &bull; Automatic Request Dispatch</div>\n      <h1 style=\"margin:8px 0 0; font-size:24px; color:#FFFFFF; font-weight:800;\">NEW AI VIDEO REQUEST — AMINA TARIQ — AVM-2026-8447</h1>\n      <p style=\"margin:6px 0 0; color:#94A3B8; font-size:14px;\">\n        Request ID: <span style=\"color:#38BDF8; font-family:monospace; font-weight:700;\">AVM-2026-8447</span>\n      </p>\n    </div>\n\n    <div style=\"padding:28px;\">\n\n      <!-- REQUEST TYPE & CURRENT STATUS -->\n      <div style=\"margin-bottom:24px; padding:18px; background:#131B2E; border-left:5px solid #F59E0B; border-radius:6px;\">\n        <div style=\"font-size:15px; font-weight:800; color:#F59E0B; letter-spacing:0.5px;\">\n          REQUEST TYPE: PAID REQUEST\n        </div>\n        <p style=\"margin:6px 0 0; font-size:14px; color:#FFFFFF;\">\n          ⚡ Paid Request — \"The payment will be based on the video.\"\n        </p>\n        <p style=\"margin:6px 0 0; font-size:13px; color:#94A3B8;\">\n          <strong>Current Request Status:</strong> <span style=\"color:#60A5FA; font-weight:700;\">Submitted</span>\n        </p>\n      </div>\n\n      <!-- CUSTOMER INFORMATION -->\n      <div style=\"margin-bottom:24px;\">\n        <h3 style=\"margin:0 0 10px; font-size:13px; text-transform:uppercase; letter-spacing:1px; color:#818CF8; font-weight:700;\">Customer Information</h3>\n        <table style=\"width:100%; border-collapse:collapse; font-size:14px; background:#0B0F19; border:1px solid #1E293B; border-radius:8px; padding:12px;\">\n          <tr>\n            <td style=\"padding:8px 12px; color:#94A3B8; width:200px;\">Customer Name:</td>\n            <td style=\"padding:8px 12px; color:#FFFFFF; font-weight:700;\">Amina Tariq</td>\n          </tr>\n          <tr>\n            <td style=\"padding:8px 12px; color:#94A3B8;\">Customer Username:</td>\n            <td style=\"padding:8px 12px; color:#A78BFA; font-family:monospace; font-weight:700;\">@amina_t</td>\n          </tr>\n          <tr>\n            <td style=\"padding:8px 12px; color:#94A3B8;\">Customer Email Address (Delivery):</td>\n            <td style=\"padding:8px 12px; color:#38BDF8; font-weight:700;\">amina.tariq@example.com</td>\n          </tr>\n          <tr>\n            <td style=\"padding:8px 12px; color:#94A3B8;\">Request ID:</td>\n            <td style=\"padding:8px 12px; color:#38BDF8; font-family:monospace; font-weight:700;\">AVM-2026-8447</td>\n          </tr>\n          <tr>\n            <td style=\"padding:8px 12px; color:#94A3B8;\">Request Submission Date & Time:</td>\n            <td style=\"padding:8px 12px; color:#FFFFFF;\">11/4/2026, 9:40:41 AM (Wed, 04 Nov 2026 09:40:41 GMT)</td>\n          </tr>\n          \n        </table>\n      </div>\n\n      <!-- VIDEO SPECIFICATIONS -->\n      <div style=\"margin-bottom:24px;\">\n        <h3 style=\"margin:0 0 10px; font-size:13px; text-transform:uppercase; letter-spacing:1px; color:#94A3B8; font-weight:700;\">Video Specifications & Preferences</h3>\n        <table style=\"width:100%; border-collapse:collapse; font-size:14px; background:#0B0F19; border:1px solid #1E293B; border-radius:8px;\">\n          <tr>\n            <td style=\"padding:8px 12px; color:#94A3B8; width:200px;\">Video Title:</td>\n            <td style=\"padding:8px 12px; color:#FFFFFF; font-weight:700;\">Desert Starlight Odyssey</td>\n          </tr>\n          <tr>\n            <td style=\"padding:8px 12px; color:#94A3B8;\">Video Category & Style:</td>\n            <td style=\"padding:8px 12px; color:#FFFFFF; font-weight:600;\">Cinematic Short &bull; Entertainment &bull; Realistic cinematic</td>\n          </tr>\n          <tr>\n            <td style=\"padding:8px 12px; color:#94A3B8;\">Portrait or Landscape Format:</td>\n            <td style=\"padding:8px 12px; color:#FFFFFF; font-weight:600;\">LANDSCAPE (16:9) &mdash; 1080p Full HD</td>\n          </tr>\n          <tr>\n            <td style=\"padding:8px 12px; color:#94A3B8;\">Requested Duration:</td>\n            <td style=\"padding:8px 12px; color:#FFFFFF; font-weight:600;\">30 seconds</td>\n          </tr>\n          <tr>\n            <td style=\"padding:8px 12px; color:#94A3B8;\">Video Language:</td>\n            <td style=\"padding:8px 12px; color:#38BDF8; font-weight:700;\">English</td>\n          </tr>\n          <tr>\n            <td style=\"padding:8px 12px; color:#94A3B8;\">Dialogue & Voice-Over Preferences:</td>\n            <td style=\"padding:8px 12px; color:#FFFFFF;\">Voice-Over: None &bull; Dialogue: Standard &bull; Subtitles: No</td>\n          </tr>\n          <tr>\n            <td style=\"padding:8px 12px; color:#94A3B8;\">Music Preferences:</td>\n            <td style=\"padding:8px 12px; color:#FFFFFF;\">Background Music: Cinematic Ambient &bull; Sound Effects: Enabled</td>\n          </tr>\n        </table>\n      </div>\n\n      <!-- VIDEO IDEA & DESCRIPTION -->\n      <div style=\"margin-bottom:24px;\">\n        <h3 style=\"margin:0 0 10px; font-size:13px; text-transform:uppercase; letter-spacing:1px; color:#94A3B8; font-weight:700;\">Video Idea & Description</h3>\n        <div style=\"background:#090D16; padding:16px; border-radius:8px; border:1px solid #1E293B; font-size:14px; color:#E2E8F0; white-space:pre-wrap; line-height:1.7;\">\n          A traveler crosses glowing desert dunes beneath a starry night sky.\n        </div>\n      </div>\n\n      <!-- STORY & SCENE DESCRIPTIONS -->\n      <div style=\"margin-bottom:24px;\">\n        <h3 style=\"margin:0 0 10px; font-size:13px; text-transform:uppercase; letter-spacing:1px; color:#94A3B8; font-weight:700;\">Story & Scene Descriptions (1 Scenes)</h3>\n        <div style=\"background:#090D16; padding:16px; border-radius:8px; border:1px solid #1E293B; font-size:14px; color:#E2E8F0; white-space:pre-wrap; line-height:1.7; margin-bottom:12px;\">\n          A traveler crosses glowing desert dunes beneath a starry night sky.\n        </div>\n        \n          <div style=\"background:#131B2E; border:1px solid #1E293B; border-radius:8px; padding:12px; margin-bottom:10px;\">\n            <strong style=\"color:#A78BFA; font-size:14px;\">Scene 1: Sahara Dunes</strong>\n            <span style=\"color:#94A3B8; font-size:12px;\"> (Est. Duration)</span><br/>\n            <div style=\"margin-top:6px; font-size:13px; color:#E2E8F0; line-height:1.6;\">\n              <span style=\"color:#94A3B8;\">Time / Atmosphere:</span>  &bull; <br/>\n              <span style=\"color:#94A3B8;\">Characters Present:</span> None specified<br/>\n              <span style=\"color:#94A3B8;\">Scene Action:</span> Walking toward oasis<br/>\n              <span style=\"color:#94A3B8;\">Camera Movement:</span> Standard\n              \n            </div>\n          </div>\n        \n      </div>\n\n      <!-- CHARACTERS & UPLOADED REFERENCE PHOTO LINKS -->\n      <div style=\"margin-bottom:24px;\">\n        <h3 style=\"margin:0 0 10px; font-size:13px; text-transform:uppercase; letter-spacing:1px; color:#94A3B8; font-weight:700;\">Character Names, Descriptions & Uploaded Reference Photo Links (1)</h3>\n        \n          <div style=\"background:#131B2E; border:1px solid #1E293B; border-radius:8px; padding:14px; margin-bottom:12px;\">\n            <div style=\"display:flex; justify-content:space-between; align-items:flex-start;\">\n              <div>\n                <strong style=\"color:#60A5FA; font-size:15px;\">Amina</strong>\n                <span style=\"color:#94A3B8; font-size:13px;\"> &mdash; Traveler</span>\n              </div>\n            </div>\n            <div style=\"margin-top:8px; font-size:13px; color:#E2E8F0; line-height:1.7;\">\n              <p style=\"margin:2px 0;\"><span style=\"color:#94A3B8;\">Appearance:</span> Desert cloak and lantern</p>\n              \n              \n              \n              \n              \n            </div>\n            \n          </div>\n        \n      </div>\n\n      <!-- CHARACTER DIALOGUES -->\n      <div style=\"margin-bottom:24px;\">\n        <h3 style=\"margin:0 0 10px; font-size:13px; text-transform:uppercase; letter-spacing:1px; color:#94A3B8; font-weight:700;\">Character Dialogues</h3>\n        <p style=\"color:#94A3B8;\">No separate dialogue lines registered.</p>\n      </div>\n\n      <!-- SPECIAL INSTRUCTIONS -->\n      <div style=\"margin-bottom:24px;\">\n        <h3 style=\"margin:0 0 10px; font-size:13px; text-transform:uppercase; letter-spacing:1px; color:#94A3B8; font-weight:700;\">Special Instructions</h3>\n        <div style=\"background:#131B2E; padding:14px; border-radius:6px; font-size:13px; color:#E2E8F0; border:1px solid #1E293B;\">\n          None provided by customer.\n        </div>\n      </div>\n\n      <!-- ADMIN ACTION BUTTON -->\n      <div style=\"text-align:center; padding:24px 0 12px;\">\n        <a href=\"https://ais-dev-eval4556daji7ihjgwnfzr-589743996180.asia-northeast1.run.app/admin?request=AVM-2026-8447\" style=\"display:inline-block; background:linear-gradient(135deg, #6366F1 0%, #4F46E5 100%); color:#FFFFFF; text-decoration:none; padding:14px 36px; border-radius:8px; font-weight:700; font-size:15px; box-shadow:0 4px 14px rgba(99, 102, 241, 0.4);\">\n          Open Request in Admin Dashboard &rarr;\n        </a>\n      </div>\n\n    </div>\n\n    <!-- FOOTER -->\n    <div style=\"padding:16px 28px; background:#0B0F19; border-top:1px solid #1E293B; font-size:12px; color:#64748B; text-align:center;\">\n      AI Video Maker &bull; Automatic Request Delivery to muhammedalimdd@gmail.com &bull; AVM-2026-8447\n    </div>\n  </div>\n</body>\n</html>\n    ",
+      "textBody": "NEW AI VIDEO REQUEST — AMINA TARIQ — AVM-2026-8447\n\n1. Customer Name: Amina Tariq\n2. Customer Username: @amina_t\n3. Customer Email Address: amina.tariq@example.com\n4. Request ID: AVM-2026-8447\n5. Request Submission Date and Time: 2026-11-04T09:40:41.473Z\n6. Video Title: Desert Starlight Odyssey\n7. Video Idea and Description: A traveler crosses glowing desert dunes beneath a starry night sky.\n8. Video Category and Style: Cinematic Short / Entertainment / Realistic cinematic\n9. Portrait or Landscape Format: LANDSCAPE (16:9) — 1080p Full HD\n10. Requested Duration: 30 seconds\n11. Video Language: English\n12. Character Names and Descriptions:\n- Amina (Traveler): Appearance: Desert cloak and lantern\n13. Uploaded Reference Photo Links:\nNo reference photos uploaded\n14. Story and Scene Descriptions:\nStory: A traveler crosses glowing desert dunes beneath a starry night sky.\nScene 1 (Sahara Dunes): Action: Walking toward oasis | Camera: undefined | Lighting: undefined\n15. Dialogue and Voice-Over Preferences:\nVoice-Over: None | Dialogue Preference: Standard | Subtitles: No\n\n16. Music Preferences:\nBackground Music: Cinematic Ambient | Sound Effects: Yes\n17. Free Trial or Paid Request Type: PAID REQUEST\n18. Current Request Status: Submitted\n\nSpecial Instructions:\nNone provided.\n\nOpen in Admin Dashboard:\nhttps://ais-dev-eval4556daji7ihjgwnfzr-589743996180.asia-northeast1.run.app/admin?request=AVM-2026-8447",
+      "error": "Queued for muhammedalimdd@gmail.com: Configure Gmail App Password in Admin Settings > Email Configuration for automatic SMTP, or click \"Retry\" / \"Open in Gmail\".",
+      "id": "eml_e3df091d5746d2a1",
+      "sentAt": "2026-11-04T09:40:41.487Z"
+    },
+    {
+      "requestId": "BR-2026-BD16",
+      "type": "budget_request_customer",
+      "recipient": "amina.tariq@example.com",
+      "subject": "Your AI Video Idea & Budget Request Has Been Received — [BR-2026-BD16]",
+      "status": "failed",
+      "htmlBody": "\n<!DOCTYPE html>\n<html>\n<head><meta charset=\"utf-8\"/></head>\n<body style=\"margin:0; padding:24px; background-color:#0B0F19; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color:#F1F5F9; line-height:1.6;\">\n  <div style=\"max-width:600px; margin:0 auto; background-color:#0F172A; border:1px solid #1E293B; border-radius:12px; overflow:hidden;\">\n    <div style=\"background:linear-gradient(135deg, #1E1B4B 0%, #0F172A 100%); padding:24px; text-align:center;\">\n      <h2 style=\"margin:0; color:#FFFFFF;\">Your Request Has Been Sent Successfully!</h2>\n      <p style=\"margin:6px 0 0; color:#94A3B8; font-size:14px;\">Request ID: <span style=\"color:#60A5FA;\">BR-2026-BD16</span></p>\n    </div>\n    <div style=\"padding:24px;\">\n      <p style=\"color:#CBD5E1; font-size:14px; margin-top:0;\">Hello <strong>Amina Tariq</strong>,</p>\n      <p style=\"color:#CBD5E1; font-size:14px;\">\n        Thank you for sharing your video idea with AI Video Maker. We have received your request and will review it.\n      </p>\n      \n    </div>\n  </div>\n</body>\n</html>\n    ",
+      "textBody": "Hello Amina Tariq,\n\nWe received your request [BR-2026-BD16].\n\nAI Video Maker",
+      "error": "Queued for muhammedalimdd@gmail.com: Configure Gmail App Password in Admin Settings > Email Configuration for automatic SMTP, or click \"Retry\" / \"Open in Gmail\".",
+      "id": "eml_0bec48d9107fa6e0",
+      "sentAt": "2026-11-04T09:39:50.045Z"
+    },
+    {
+      "requestId": "BR-2026-BD16",
+      "type": "budget_request_owner",
+      "recipient": "muhammedalimdd@gmail.com",
+      "subject": "NEW AI VIDEO REQUEST — AMINA TARIQ — BR-2026-BD16",
+      "status": "failed",
+      "htmlBody": "\n<!DOCTYPE html>\n<html>\n<head><meta charset=\"utf-8\"/></head>\n<body style=\"margin:0; padding:24px; background-color:#0B0F19; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color:#F1F5F9; line-height:1.6;\">\n  <div style=\"max-width:680px; margin:0 auto; background-color:#0F172A; border:1px solid #1E293B; border-radius:12px; overflow:hidden;\">\n    <div style=\"background:linear-gradient(135deg, #1E1B4B 0%, #0F172A 100%); padding:28px; border-bottom:1px solid #1E293B;\">\n      <div style=\"font-size:11px; text-transform:uppercase; letter-spacing:1.5px; color:#818CF8; font-weight:700;\">AI Video Maker &bull; Direct Request Notification</div>\n      <h2 style=\"margin:6px 0 0; font-size:22px; color:#FFFFFF;\">NEW AI VIDEO REQUEST — AMINA TARIQ — BR-2026-BD16</h2>\n      <p style=\"margin:4px 0 0; color:#94A3B8; font-size:14px;\">Request ID: <span style=\"color:#60A5FA; font-family:monospace;\">BR-2026-BD16</span> &bull; Budget: <strong style=\"color:#34D399;\">STANDARD (₹299)</strong></p>\n    </div>\n    <div style=\"padding:28px;\">\n      <div style=\"background:#131B2E; padding:16px; border-radius:8px; margin-bottom:20px; border:1px solid #1E293B;\">\n        <h4 style=\"margin:0 0 10px; color:#818CF8; font-size:13px; text-transform:uppercase;\">Customer &amp; Request Details</h4>\n        <p style=\"margin:3px 0; font-size:14px;\"><strong>Customer Name:</strong> Amina Tariq</p>\n        <p style=\"margin:3px 0; font-size:14px;\"><strong>Customer Email:</strong> <a href=\"mailto:amina.tariq@example.com\" style=\"color:#38BDF8;\">amina.tariq@example.com</a></p>\n        <p style=\"margin:3px 0; font-size:14px;\"><strong>Request ID:</strong> BR-2026-BD16</p>\n        <p style=\"margin:3px 0; font-size:14px;\"><strong>Submitted At:</strong> Wed, 04 Nov 2026 09:39:50 GMT</p>\n        <p style=\"margin:3px 0; font-size:14px;\"><strong>Preferred Video Type:</strong> commercial</p>\n        <p style=\"margin:3px 0; font-size:14px;\"><strong>Video Format / Aspect Ratio:</strong> PORTRAIT (9:16)</p>\n        <p style=\"margin:3px 0; font-size:14px;\"><strong>Requested Duration:</strong> 30 seconds</p>\n        <p style=\"margin:3px 0; font-size:14px;\"><strong>Budget Tier:</strong> STANDARD (₹299)</p>\n        <p style=\"margin:3px 0; font-size:14px;\"><strong>Current Status:</strong> Submitted</p>\n      </div>\n      <div style=\"margin-bottom:20px;\">\n        <h4 style=\"margin:0 0 6px; color:#94A3B8; font-size:13px; text-transform:uppercase;\">Video Idea &amp; Concept</h4>\n        <div style=\"background:#090D16; padding:14px; border-radius:8px; font-size:14px; color:#F1F5F9; white-space:pre-wrap; border:1px solid #1E293B;\">Product launch trailer for luxury perfume bottle</div>\n      </div>\n      <div style=\"margin-bottom:20px;\">\n        <h4 style=\"margin:0 0 6px; color:#94A3B8; font-size:13px; text-transform:uppercase;\">Detailed Story / Scene Description</h4>\n        <div style=\"background:#090D16; padding:14px; border-radius:8px; font-size:14px; color:#F1F5F9; white-space:pre-wrap; border:1px solid #1E293B;\">Golden lighting and slow motion water droplets</div>\n      </div>\n      \n      \n      <div style=\"text-align:center; padding-top:16px;\">\n        <a href=\"https://ais-dev-eval4556daji7ihjgwnfzr-589743996180.asia-northeast1.run.app/admin?budget=BR-2026-BD16\" style=\"display:inline-block; background:#6366F1; color:#FFFFFF; text-decoration:none; padding:12px 28px; border-radius:8px; font-weight:600;\">Open Request in Admin &rarr;</a>\n      </div>\n    </div>\n  </div>\n</body>\n</html>\n    ",
+      "textBody": "NEW AI VIDEO REQUEST — AMINA TARIQ — BR-2026-BD16\n============================================================\nCustomer Name: Amina Tariq\nCustomer Email: amina.tariq@example.com\nRequest ID: BR-2026-BD16\nSubmission Date & Time: Wed, 04 Nov 2026 09:39:50 GMT\nPreferred Video Type: commercial\nFormat / Aspect Ratio: PORTRAIT (9:16)\nRequested Duration: 30 seconds\nBudget Category: STANDARD (₹299)\nCurrent Status: Submitted\nVIDEO IDEA:\nProduct launch trailer for luxury perfume bottle\n\nDETAILED MESSAGE:\nGolden lighting and slow motion water droplets\n\nAdmin Link: https://ais-dev-eval4556daji7ihjgwnfzr-589743996180.asia-northeast1.run.app/admin?budget=BR-2026-BD16",
+      "error": "Queued for muhammedalimdd@gmail.com: Configure Gmail App Password in Admin Settings > Email Configuration for automatic SMTP, or click \"Retry\" / \"Open in Gmail\".",
+      "id": "eml_acc34851b17eb7a4",
+      "sentAt": "2026-11-04T09:39:50.029Z"
+    },
+    {
       "requestId": "AVM-2026-DEF3",
       "type": "customer_confirmation",
       "recipient": "david.chen.4742@example.com",
@@ -1116,6 +1246,28 @@
   },
   "budgetRequests": [
     {
+      "fullName": "Amina Tariq",
+      "email": "amina.tariq@example.com",
+      "videoIdea": "Product launch trailer for luxury perfume bottle",
+      "detailedMessage": "Golden lighting and slow motion water droplets",
+      "preferredVideoType": "commercial",
+      "videoFormat": "portrait",
+      "aspectRatio": "9:16",
+      "preferredDuration": "30 seconds",
+      "budgetCategory": "STANDARD",
+      "budgetAmount": "₹299",
+      "isFree": false,
+      "referencePhotoUrl": "",
+      "referencePhotoName": "",
+      "additionalInstructions": "",
+      "status": "Submitted",
+      "id": "BR-2026-BD16",
+      "createdAt": "2026-11-04T09:39:50.024Z",
+      "updatedAt": "2026-11-04T09:39:50.024Z",
+      "internalNotes": [],
+      "replies": []
+    },
+    {
       "fullName": "Amina Al-Khatib",
       "email": "amina.test@example.com",
       "videoIdea": "A cinematic teaser of ancient maritime trade in the Indian Ocean with dhow ships and spices.",
@@ -1243,6 +1395,17 @@
       "role": "user",
       "trialUsedAt": "2026-11-04T06:39:55.476Z",
       "trialRequestId": "AVM-2026-DEF3"
+    },
+    {
+      "uid": "usr-21573916cc09",
+      "username": "aminatariq",
+      "email": "amina.tariq@example.com",
+      "displayName": "Amina Tariq",
+      "photoURL": "",
+      "createdAt": "2026-11-04T09:40:41.469Z",
+      "lastLoginAt": "2026-11-04T09:40:41.469Z",
+      "trialStatus": "eligible",
+      "role": "user"
     }
   ],
   "auditLogs": [
