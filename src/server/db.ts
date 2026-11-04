@@ -827,6 +827,9 @@ class Database {
     const user = this.data.users.find(
       (u) =>
         (requestData.userId && u.uid === requestData.userId) ||
+        (requestData.customerUsername &&
+          u.username &&
+          u.username.toLowerCase() === requestData.customerUsername.trim().toLowerCase()) ||
         u.email.toLowerCase() === normalizedEmail
     );
 
@@ -835,10 +838,10 @@ class Database {
     // ATOMIC FREE TRIAL ENFORCEMENT
     if (isFreeTrial) {
       if (!user) {
-        throw new Error('A verified Google account is required to claim a free trial.');
+        throw new Error('A registered user account is required to claim a free trial.');
       }
       if (user.trialStatus !== 'eligible') {
-        throw new Error('This Google account has already used its one-time free trial. Please submit a paid video request.');
+        throw new Error('This account has already used its one-time free trial. Please submit a paid video request.');
       }
 
       // Mark trial as used atomically
@@ -850,6 +853,7 @@ class Database {
     try {
       const newRequest: VideoRequest = {
         ...requestData,
+        customerUsername: requestData.customerUsername || user?.username || requestData.customerName,
         id: newId,
         accessToken,
         createdAt: now,
@@ -875,8 +879,8 @@ class Database {
             : { status: 'pending' }),
         internalAdminNotes: [
           isFreeTrial
-            ? `Submitted as 1-Time Free Trial by verified user ${normalizedEmail}.`
-            : `Submitted as Paid Request. Price to be quoted based on creative brief.`
+            ? `Submitted as 1-Time Free Trial by user ${requestData.customerUsername || normalizedEmail} (Delivery Email: ${normalizedEmail}).`
+            : `Submitted as Paid Request (Delivery Email: ${normalizedEmail}). Price to be quoted based on creative brief.`
         ],
         statusHistory: [
           {
@@ -1055,24 +1059,35 @@ class Database {
 
   public deliverVideo(
     id: string,
-    delivery: { directLink?: string; message?: string }
+    delivery: {
+      directLink?: string;
+      downloadUrl?: string;
+      filename?: string;
+      sizeBytes?: number;
+      message?: string;
+    }
   ): VideoRequest | null {
     const request = this.getRequestById(id);
     if (!request) return null;
 
     const now = new Date().toISOString();
+    const link = delivery.directLink || delivery.downloadUrl || '';
     return this.updateRequest(
       id,
       {
-        status: 'Completed',
+        status: 'Delivered',
         completedVideo: {
-          directLink: delivery.directLink,
-          message: delivery.message || 'Your custom AI video has been produced and is ready for download.',
+          url: link,
+          directLink: link,
+          downloadUrl: delivery.downloadUrl || link,
+          filename: delivery.filename,
+          sizeBytes: delivery.sizeBytes,
+          message: delivery.message || 'Your custom AI video has been produced and delivered to your email address.',
           uploadedAt: now
         }
       },
       'admin',
-      'Video production completed and delivery link attached.'
+      `Completed video delivered to customer email (${request.customerEmail}).`
     );
   }
 

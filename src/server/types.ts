@@ -203,7 +203,8 @@ export interface VideoRequest {
 
   // Step 7: Customer Delivery
   customerName: string;
-  customerEmail: string; // Verified Google email
+  customerUsername?: string;
+  customerEmail: string; // Customer's preferred delivery email address
   customerPhone?: string;
   emailNotifications: boolean;
   termsAccepted: boolean;

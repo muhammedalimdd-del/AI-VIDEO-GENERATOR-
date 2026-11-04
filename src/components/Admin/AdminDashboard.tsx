@@ -36,7 +36,8 @@ import {
   seedInitialFirestoreData,
   getAllVideoRequestsFromFirestore,
   getAllBudgetRequestsFromFirestore,
-  getAllUsersFromFirestore
+  getAllUsersFromFirestore,
+  saveVideoRequestToFirestore
 } from '../../services/firestoreService.ts';
 import { safeFetchJson, safeResponseJson } from '../../services/apiClient.ts';
 
@@ -84,8 +85,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
   const [customerNotesToSet, setCustomerNotesToSet] = useState('');
   const [newInternalNote, setNewInternalNote] = useState('');
   const [videoDeliveryUrl, setVideoDeliveryUrl] = useState('');
+  const [uploadedVideoFilename, setUploadedVideoFilename] = useState('');
+  const [uploadedVideoSize, setUploadedVideoSize] = useState<number | undefined>(undefined);
   const [deliveryMessage, setDeliveryMessage] = useState('Your AI video has been produced and quality checked.');
   const [isUploadingVideo, setIsUploadingVideo] = useState(false);
+  const [isSendingVideo, setIsSendingVideo] = useState(false);
 
   // Custom Quote Fields
   const [quoteAmount, setQuoteAmount] = useState<number>(1500);
@@ -473,14 +477,57 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
     }
   };
 
-  // Video Delivery Workflow
+  // Upload Completed Video File
+  const handleUploadCompletedVideoFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIsUploadingVideo(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await fetch('/api/upload', {
+        method: 'POST',
+        body: formData
+      });
+      const parsed = await safeResponseJson<{
+        success?: boolean;
+        fileUrl?: string;
+        filename?: string;
+        originalName?: string;
+        size?: number;
+        error?: string;
+      }>(res);
+
+      if (parsed.ok && parsed.data?.fileUrl) {
+        const fullUrl = parsed.data.fileUrl.startsWith('http')
+          ? parsed.data.fileUrl
+          : `${window.location.origin}${parsed.data.fileUrl}`;
+        setVideoDeliveryUrl(fullUrl);
+        setUploadedVideoFilename(parsed.data.originalName || parsed.data.filename || file.name);
+        setUploadedVideoSize(parsed.data.size || file.size);
+      } else {
+        alert(parsed.data?.error || parsed.error || 'Failed to upload video file.');
+      }
+    } catch (err: any) {
+      alert(err.message || 'Error uploading video file.');
+    } finally {
+      setIsUploadingVideo(false);
+    }
+  };
+
+  // Video Delivery Workflow ("Send Video to Customer")
   const handleDeliverVideo = async () => {
     if (!selectedRequest || !videoDeliveryUrl.trim()) {
-      alert('Please enter or upload a valid video download link.');
+      alert('Please upload a completed video file or enter a valid video download link.');
       return;
     }
+    setIsSendingVideo(true);
     try {
-      const result = await safeFetchJson<{ request?: any; error?: string }>(`/api/admin/requests/${selectedRequest.id}/deliver-video`, {
+      const result = await safeFetchJson<{
+        request?: any;
+        emailResult?: { success: boolean; status: string; error?: string };
+        error?: string;
+      }>(`/api/admin/requests/${selectedRequest.id}/deliver-video`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -488,18 +535,38 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
         },
         body: JSON.stringify({
           directLink: videoDeliveryUrl.trim(),
+          downloadUrl: videoDeliveryUrl.trim(),
+          filename: uploadedVideoFilename || undefined,
+          sizeBytes: uploadedVideoSize,
           message: deliveryMessage.trim()
         })
       });
       if (result.ok && result.data?.request) {
-        setSelectedRequest(result.data.request);
-        alert('Completed video delivered to customer email successfully!');
+        const updatedReq = result.data.request;
+        setSelectedRequest(updatedReq);
+        setStatusToSet(updatedReq.status);
+        try {
+          await saveVideoRequestToFirestore(updatedReq);
+        } catch {
+          // ignore background sync notice
+        }
         loadData();
+        if (result.data.emailResult?.success) {
+          alert(`Completed video sent to ${updatedReq.customerEmail} and request marked as Delivered!`);
+        } else {
+          alert(
+            `Request marked as Delivered and download link saved! Note: Email transmission was logged as failed (${
+              result.data.emailResult?.error || 'SMTP/API credentials not configured'
+            }) — you can retry sending from Email Logs.`
+          );
+        }
       } else {
         alert(result.data?.error || result.error || 'Delivery failed');
       }
     } catch (e: any) {
       alert(e.message);
+    } finally {
+      setIsSendingVideo(false);
     }
   };
 
@@ -968,8 +1035,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
                           <td className="py-3.5 px-4">
                             <span className="font-bold text-white block group-hover:text-indigo-200">
                               {r.customerName}
+                              {r.customerUsername && (
+                                <span className="ml-1.5 text-[10px] font-mono text-purple-300">
+                                  (@{r.customerUsername})
+                                </span>
+                              )}
                             </span>
-                            <span className="text-slate-400 font-mono text-[11px]">
+                            <span className="text-indigo-300 font-mono text-[11px]" title="Email Address for Video Delivery">
                               {r.customerEmail}
                             </span>
                           </td>
@@ -1589,19 +1661,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
                 </div>
               )}
 
-              {/* API KEY CONFIGURATION (RESEND / SENDGRID) */}
+              {/* API KEY CONFIGURATION (SERVER ENVIRONMENT NOTICE) */}
               {(settingsProvider === 'resend' || settingsProvider === 'sendgrid') && (
-                <div className="p-4 rounded-xl bg-[#0C1220] border border-slate-800 space-y-3">
-                  <label className="block text-xs font-semibold text-slate-300">
-                    {settingsProvider === 'resend' ? 'Resend API Key (re_...)' : 'SendGrid API Key (SG...)'}
-                  </label>
-                  <input
-                    type="password"
-                    value={settingsApiKey}
-                    onChange={(e) => setSettingsApiKey(e.target.value)}
-                    placeholder={settingsProvider === 'resend' ? 're_123456789...' : 'SG.xxxxxxxxxxxx'}
-                    className="w-full px-4 py-3 bg-[#090D16] border border-slate-800 rounded-xl text-white text-xs font-mono"
-                  />
+                <div className="p-4 rounded-xl bg-[#0C1220] border border-slate-800 space-y-2 text-xs text-slate-300">
+                  <p className="font-semibold text-white">
+                    {settingsProvider === 'resend' ? 'Resend Transactional Email API' : 'SendGrid Transactional Email API'}
+                  </p>
+                  <p className="text-slate-400">
+                    For security, transactional API keys (<code className="text-indigo-300">RESEND_API_KEY</code> or <code className="text-indigo-300">SENDGRID_API_KEY</code>) are read directly from server environment variables (<code className="text-indigo-300">.env</code>).
+                  </p>
                 </div>
               )}
 
@@ -1776,19 +1844,33 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
                     <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${selectedRequest.requestType === 'free_trial' ? 'bg-emerald-950 text-emerald-300 border border-emerald-800' : 'bg-indigo-950 text-indigo-300 border border-indigo-800'}`}>
                       {selectedRequest.requestType === 'free_trial' ? '🎁 One-Time Free Trial' : '💳 Paid Video Request'}
                     </span>
+                    <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-slate-800 text-cyan-300 border border-slate-700">
+                      {selectedRequest.status}
+                    </span>
                   </div>
                   <h3 className="text-xl font-extrabold text-white mt-1">{selectedRequest.title}</h3>
-                  <p className="text-xs text-slate-400">
-                    Customer: {selectedRequest.customerName} · <span className="text-indigo-400 font-mono">{selectedRequest.customerEmail}</span>
-                  </p>
-                  <div className="mt-2.5">
+                  <div className="text-xs text-slate-300 mt-1 space-y-0.5">
+                    <p>
+                      Customer Name: <strong className="text-white">{selectedRequest.customerName}</strong>
+                      {selectedRequest.customerUsername && (
+                        <span className="ml-2 text-purple-300 font-mono">
+                          (Username: @{selectedRequest.customerUsername})
+                        </span>
+                      )}
+                    </p>
+                    <p>
+                      Email Address for Video Delivery:{' '}
+                      <strong className="text-indigo-300 font-mono">{selectedRequest.customerEmail}</strong>
+                    </p>
+                  </div>
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
                     <button
                       onClick={() => handleResendOwnerEmail(selectedRequest.id)}
                       disabled={isResendingOwnerEmail}
                       className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs cursor-pointer shadow transition-all disabled:opacity-50"
                     >
                       <Mail className="w-3.5 h-3.5" />
-                      <span>{isResendingOwnerEmail ? 'Dispatching to Gmail...' : 'Resend Request to Owner Gmail (muhammedalimdd@gmail.com)'}</span>
+                      <span>{isResendingOwnerEmail ? 'Dispatching to Gmail...' : 'Send / Resend Request to Owner Gmail (muhammedalimdd@gmail.com)'}</span>
                     </button>
                   </div>
                 </div>
@@ -1799,6 +1881,50 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
                   <X className="w-5 h-5" />
                 </button>
               </div>
+
+              {/* Email Delivery Logs for this Request (with Retry button if failed) */}
+              {emailLogs.filter((l) => l.requestId === selectedRequest.id).length > 0 && (
+                <div className="p-4 rounded-xl bg-[#0C1220] border border-slate-800 mb-6 space-y-2">
+                  <span className="text-xs font-bold uppercase tracking-wider text-slate-300 block">
+                    Email Notification Status for {selectedRequest.id}
+                  </span>
+                  <div className="space-y-2">
+                    {emailLogs
+                      .filter((l) => l.requestId === selectedRequest.id)
+                      .map((l) => (
+                        <div
+                          key={l.id}
+                          className="p-2.5 rounded-lg bg-[#090D16] border border-slate-800 flex flex-wrap items-center justify-between gap-2 text-xs"
+                        >
+                          <div>
+                            <span
+                              className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold uppercase mr-2 ${
+                                l.status === 'sent'
+                                  ? 'bg-emerald-950 text-emerald-300 border border-emerald-800'
+                                  : 'bg-rose-950 text-rose-300 border border-rose-800'
+                              }`}
+                            >
+                              {l.status === 'sent' ? '✓ Sent' : '✕ Failed'}
+                            </span>
+                            <span className="text-white font-semibold">{l.type}</span>
+                            <span className="text-slate-400 ml-2 font-mono">→ {l.recipient}</span>
+                            {l.error && <p className="text-[11px] text-rose-400 mt-1">{l.error}</p>}
+                          </div>
+                          {l.status === 'failed' && (
+                            <button
+                              onClick={() => handleRetryEmail(l.id)}
+                              disabled={retryingLogId === l.id}
+                              className="px-3 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-[11px] cursor-pointer flex items-center gap-1"
+                            >
+                              <RotateCcw className={`w-3 h-3 ${retryingLogId === l.id ? 'animate-spin' : ''}`} />
+                              <span>{retryingLogId === l.id ? 'Retrying...' : 'Retry Failed Email'}</span>
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              )}
 
               {/* Status Update & Date controls */}
               <div className="p-4 rounded-xl bg-[#0C1220] border border-slate-800 mb-6 space-y-4">
@@ -1932,7 +2058,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
                       disabled={isSendingQuote}
                       className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs cursor-pointer shadow-md"
                     >
-                      {isSendingQuote ? 'Sending Quote...' : 'Send Custom Quote to Customer Email &rarr;'}
+                      {isSendingQuote ? 'Sending Quote...' : 'Send Custom Quote to Customer Email \u2192'}
                     </button>
 
                     <button
@@ -1945,30 +2071,62 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
                 </div>
               )}
 
-              {/* VIDEO DELIVERY WORKFLOW */}
+              {/* VIDEO DELIVERY WORKFLOW ("Send Completed Video to Customer Email") */}
               <div className="p-5 rounded-2xl bg-gradient-to-b from-emerald-950/40 to-slate-900 border border-emerald-800/60 mb-6 space-y-4">
-                <div className="flex items-center gap-2">
-                  <Video className="w-5 h-5 text-emerald-400" />
-                  <h4 className="text-sm font-bold text-white">Deliver Completed Video</h4>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Video className="w-5 h-5 text-emerald-400" />
+                    <h4 className="text-sm font-bold text-white">Upload & Send Completed Video to Customer</h4>
+                  </div>
+                  <span className="text-[11px] text-emerald-300 font-mono">
+                    Destination: {selectedRequest.customerEmail}
+                  </span>
                 </div>
 
                 <div className="space-y-3">
+                  {/* Step A: Upload Completed Video File */}
+                  <div className="p-3.5 rounded-xl bg-[#090D16] border border-slate-800">
+                    <label className="block text-[11px] font-semibold text-slate-300 mb-2">
+                      1. Upload Completed Video File (MP4, MOV, WebM)
+                    </label>
+                    <div className="flex flex-wrap items-center gap-3">
+                      <label className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs cursor-pointer inline-flex items-center gap-2 shadow">
+                        <Upload className="w-3.5 h-3.5" />
+                        <span>{isUploadingVideo ? 'Uploading Video...' : 'Upload Completed Video'}</span>
+                        <input
+                          type="file"
+                          accept="video/*,.mp4,.mov,.webm"
+                          onChange={handleUploadCompletedVideoFile}
+                          className="hidden"
+                          disabled={isUploadingVideo}
+                        />
+                      </label>
+                      {uploadedVideoFilename && (
+                        <span className="text-xs text-emerald-300 font-mono flex items-center gap-1">
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          Uploaded: {uploadedVideoFilename}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Step B: Secure Video Download Link */}
                   <div>
                     <label className="block text-[11px] font-semibold text-slate-300 mb-1">
-                      Direct Video URL (Cloud Storage, Google Drive, or CDN)
+                      2. Secure Video Download Link (Auto-filled from upload or enter Cloud/Drive URL)
                     </label>
                     <input
                       type="text"
                       value={videoDeliveryUrl}
                       onChange={(e) => setVideoDeliveryUrl(e.target.value)}
-                      placeholder="https://storage.googleapis.com/... or drive.google.com/..."
-                      className="w-full px-3 py-2 bg-[#090D16] border border-slate-800 rounded-lg text-xs text-white"
+                      placeholder="https://... or upload video file above"
+                      className="w-full px-3 py-2 bg-[#090D16] border border-slate-800 rounded-lg text-xs text-white font-mono"
                     />
                   </div>
 
                   <div>
                     <label className="block text-[11px] font-semibold text-slate-300 mb-1">
-                      Delivery Message to Customer
+                      3. Delivery Message to Customer
                     </label>
                     <input
                       type="text"
@@ -1980,22 +2138,67 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
 
                   <button
                     onClick={handleDeliverVideo}
-                    className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-md cursor-pointer flex items-center justify-center gap-2"
+                    disabled={isSendingVideo || isUploadingVideo}
+                    className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-lg cursor-pointer flex items-center justify-center gap-2 disabled:opacity-50"
                   >
                     <Send className="w-4 h-4" />
-                    <span>Send Delivery Email & Mark Completed</span>
+                    <span>{isSendingVideo ? 'Sending Video to Customer...' : 'Send Video to Customer'}</span>
                   </button>
                 </div>
               </div>
 
-              {/* STORY & CHARACTERS PREVIEW */}
-              <div className="p-4 rounded-xl bg-[#0C1220] border border-slate-800 space-y-3 text-xs mb-6">
-                <h4 className="font-bold text-white">Story & Creative Brief</h4>
-                <div className="p-3 bg-[#090D16] rounded border border-slate-800 whitespace-pre-wrap text-slate-200">
-                  {selectedRequest.storyDescription}
+              {/* COMPLETE REQUEST DETAILS PREVIEW */}
+              <div className="p-4 rounded-xl bg-[#0C1220] border border-slate-800 space-y-4 text-xs mb-6">
+                <h4 className="font-bold text-white text-sm border-b border-slate-800 pb-2">
+                  Complete Customer Video Request Details
+                </h4>
+
+                {/* Specifications Grid */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 bg-[#090D16] p-3.5 rounded-xl border border-slate-800/80">
+                  <div><span className="text-slate-400">Customer Name:</span> <strong className="text-white">{selectedRequest.customerName}</strong></div>
+                  <div><span className="text-slate-400">Customer Username:</span> <strong className="text-purple-300 font-mono">@{selectedRequest.customerUsername || selectedRequest.userId || selectedRequest.customerName}</strong></div>
+                  <div><span className="text-slate-400">Delivery Email:</span> <strong className="text-indigo-300 font-mono">{selectedRequest.customerEmail}</strong></div>
+                  <div><span className="text-slate-400">Submitted At:</span> <strong className="text-white">{new Date(selectedRequest.createdAt).toLocaleString()}</strong></div>
+                  <div><span className="text-slate-400">Category / Purpose:</span> <strong className="text-white">{selectedRequest.videoType} · {selectedRequest.purpose}</strong></div>
+                  <div><span className="text-slate-400">Visual Style:</span> <strong className="text-white">{selectedRequest.style}</strong></div>
+                  <div><span className="text-slate-400">Format & Aspect Ratio:</span> <strong className="text-white uppercase">{selectedRequest.format} ({selectedRequest.aspectRatio})</strong></div>
+                  <div><span className="text-slate-400">Duration:</span> <strong className="text-white">{selectedRequest.duration}</strong></div>
+                  <div><span className="text-slate-400">Language:</span> <strong className="text-cyan-300">{selectedRequest.language || 'English'}</strong></div>
+                  <div><span className="text-slate-400">Voice-Over & Dialogue:</span> <strong className="text-white">{selectedRequest.voiceOverPref || 'None'} / {selectedRequest.dialoguePref || 'Standard'}</strong></div>
+                  <div className="sm:col-span-2"><span className="text-slate-400">Music & Audio:</span> <strong className="text-white">{selectedRequest.backgroundMusic || 'Cinematic Ambient'} (Subtitles: {selectedRequest.subtitles ? 'Yes' : 'No'})</strong></div>
                 </div>
+
+                {selectedRequest.summary && (
+                  <div>
+                    <span className="font-bold text-indigo-400 block mb-1">Video Idea & Summary:</span>
+                    <div className="p-3 bg-[#090D16] rounded border border-slate-800 whitespace-pre-wrap text-slate-200">
+                      {selectedRequest.summary}
+                    </div>
+                  </div>
+                )}
+
+                <div>
+                  <span className="font-bold text-indigo-400 block mb-1">Story & Scene Descriptions:</span>
+                  <div className="p-3 bg-[#090D16] rounded border border-slate-800 whitespace-pre-wrap text-slate-200">
+                    {selectedRequest.storyDescription || selectedRequest.summary}
+                  </div>
+                </div>
+
+                {selectedRequest.scenes && selectedRequest.scenes.length > 0 && (
+                  <div className="space-y-2">
+                    <span className="font-bold text-indigo-400">Scenes ({selectedRequest.scenes.length}):</span>
+                    {selectedRequest.scenes.map((s: any, idx: number) => (
+                      <div key={idx} className="p-3 bg-[#090D16] rounded-xl border border-slate-800 space-y-1">
+                        <strong className="text-purple-300">Scene {s.sceneNumber}: {s.location}</strong>
+                        <p className="text-slate-300">Action: {s.actions}</p>
+                        {s.dialogue && <p className="text-cyan-300">Dialogue: "{s.dialogue}"</p>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
                 <div className="space-y-3">
-                  <span className="font-bold text-indigo-400">Characters ({selectedRequest.characters?.length || 0}):</span>
+                  <span className="font-bold text-indigo-400">Characters ({selectedRequest.characters?.length || 0}) & Uploaded Reference Photos:</span>
                   {selectedRequest.characters?.map((c: any, i: number) => (
                     <div key={i} className="p-3 bg-slate-900 rounded-xl border border-slate-800 space-y-2">
                       <div className="flex items-start justify-between">

@@ -1,7 +1,7 @@
 import React from 'react';
 import { RequestFormData } from '../../types/client.ts';
 import { PURPOSE_OPTIONS } from '../../data/styles.ts';
-import { Sparkles, HelpCircle, Film, Target, FileText } from 'lucide-react';
+import { Sparkles, HelpCircle, Film, Target, FileText, Mail } from 'lucide-react';
 
 interface Step1Props {
   data: RequestFormData;
@@ -18,7 +18,7 @@ export const Step1Basic: React.FC<Step1Props> = ({ data, updateData }) => {
           Step 1: Basic Information
         </h3>
         <p className="text-sm text-slate-400">
-          Give your project an identity and define its core purpose.
+          Give your project an identity, define its core purpose, and provide your delivery email address.
         </p>
       </div>
 
@@ -41,6 +41,26 @@ export const Step1Basic: React.FC<Step1Props> = ({ data, updateData }) => {
           </p>
         </div>
 
+        {/* Email Address for Video Delivery */}
+        <div>
+          <label htmlFor="step1-delivery-email" className="block text-sm font-semibold text-slate-200 mb-2 flex items-center gap-1.5">
+            <Mail className="w-4 h-4 text-indigo-400" />
+            <span>Email Address for Video Delivery</span> <span className="text-rose-400">*</span>
+          </label>
+          <input
+            id="step1-delivery-email"
+            type="email"
+            value={data.customerEmail}
+            onChange={e => updateData({ customerEmail: e.target.value, confirmEmail: e.target.value })}
+            placeholder="Enter your email address"
+            className="w-full px-4 py-3 bg-[#0C1220] border border-slate-800 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-sm transition-all font-mono"
+            required
+          />
+          <p className="text-xs text-slate-500 mt-1.5">
+            We will send your completed AI video and secure download link to this email address. You can also review or edit it before submitting.
+          </p>
+        </div>
+
         {/* Video Type */}
         <div>
           <label className="block text-sm font-semibold text-slate-200 mb-2">
@@ -50,7 +70,7 @@ export const Step1Basic: React.FC<Step1Props> = ({ data, updateData }) => {
             type="text"
             value={data.videoType}
             onChange={e => updateData({ videoType: e.target.value })}
-            placeholder="e.g. Viral Shorts teaser, Cinematic cinematic trailer, Short film sequence"
+            placeholder="e.g. Viral Shorts teaser, Cinematic trailer, Short film sequence"
             className="w-full px-4 py-3 bg-[#0C1220] border border-slate-800 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-sm transition-all"
           />
         </div>
@@ -105,3 +125,4 @@ export const Step1Basic: React.FC<Step1Props> = ({ data, updateData }) => {
     </div>
   );
 };
+

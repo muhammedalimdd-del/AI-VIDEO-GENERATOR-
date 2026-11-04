@@ -238,7 +238,41 @@ export class EmailService {
       }
     }
 
-    const errMsg = 'Cannot retry: SMTP or API credentials are not yet configured in Admin Settings.';
+    const sendgridKey = settings.apiKey || process.env.SENDGRID_API_KEY || process.env.EMAIL_PROVIDER_API_KEY;
+    if (sendgridKey && (sendgridKey.startsWith('SG.') || settings.emailProvider === 'sendgrid')) {
+      try {
+        const res = await fetch('https://api.sendgrid.com/v3/mail/send', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${sendgridKey}`
+          },
+          body: JSON.stringify({
+            personalizations: [{ to: [{ email: log.recipient }] }],
+            from: { email: fromAddress, name: 'AI Video Maker' },
+            subject: log.subject,
+            content: [
+              { type: 'text/plain', value: log.textBody },
+              { type: 'text/html', value: log.htmlBody }
+            ]
+          })
+        });
+
+        if (res.status >= 200 && res.status < 300) {
+          db.updateEmailLog(log.id, { status: 'sent', error: undefined, sentAt: new Date().toISOString() });
+          return { success: true, status: 'sent', emailLogId: log.id };
+        } else {
+          const errMsg = `SendGrid retry error status: ${res.status} ${res.statusText}`;
+          db.updateEmailLog(log.id, { status: 'failed', error: errMsg, sentAt: new Date().toISOString() });
+          return { success: false, status: 'failed', error: errMsg, emailLogId: log.id };
+        }
+      } catch (e: any) {
+        db.updateEmailLog(log.id, { status: 'failed', error: e.message, sentAt: new Date().toISOString() });
+        return { success: false, status: 'failed', error: e.message, emailLogId: log.id };
+      }
+    }
+
+    const errMsg = 'Cannot retry: SMTP or API credentials are not yet configured on the server.';
     db.updateEmailLog(log.id, { status: 'failed', error: errMsg, sentAt: new Date().toISOString() });
     return { success: false, status: 'failed', error: errMsg, emailLogId: log.id };
   }
@@ -327,12 +361,22 @@ Status: Verified
     };
   }
 
-  // 1. Email A: New Request Notification to Owner
+  // 1. Email A: New Request Notification to Owner (muhammedalimdd@gmail.com)
   // Exact Subject: NEW AI VIDEO REQUEST — [CUSTOMER NAME] — [REQUEST ID]
   public async sendOwnerNewRequestNotification(request: VideoRequest, baseUrl: string): Promise<SendResult> {
     const ownerEmail = process.env.OWNER_NOTIFICATION_EMAIL || db.getSettings().ownerNotificationEmail || 'muhammedalimdd@gmail.com';
     const adminLink = `${baseUrl}/admin?request=${request.id}`;
     const isTrial = request.requestType === 'free_trial';
+    const customerUsername = request.customerUsername || request.userId || request.customerName;
+
+    const uploadedPhotoLinks = request.characters
+      .filter((c) => !!c.referencePhotoUrl)
+      .map((c) => {
+        const fullUrl = c.referencePhotoUrl!.startsWith('http')
+          ? c.referencePhotoUrl!
+          : `${baseUrl}${c.referencePhotoUrl!.startsWith('/') ? '' : '/'}${c.referencePhotoUrl!}`;
+        return { characterName: c.name, url: fullUrl };
+      });
 
     const charactersHtml =
       request.characters.length > 0
@@ -341,7 +385,7 @@ Status: Verified
               const fullPhotoUrl = c.referencePhotoUrl
                 ? c.referencePhotoUrl.startsWith('http')
                   ? c.referencePhotoUrl
-                  : `${baseUrl}${c.referencePhotoUrl}`
+                  : `${baseUrl}${c.referencePhotoUrl.startsWith('/') ? '' : '/'}${c.referencePhotoUrl}`
                 : null;
 
               return `
@@ -363,8 +407,8 @@ Status: Verified
             ${
               fullPhotoUrl
                 ? `<div style="margin-top:10px; padding:10px; background:#0B0F19; border-radius:6px; border:1px solid #1E293B;">
-                     <span style="color:#94A3B8; font-size:12px; font-weight:600; display:block; margin-bottom:4px;">Uploaded Character Photo Reference:</span>
-                     <a href="${fullPhotoUrl}" target="_blank" style="color:#38BDF8; font-size:13px; font-weight:700; text-decoration:underline;">[View / Download High-Res Photo Reference]</a>
+                     <span style="color:#94A3B8; font-size:12px; font-weight:600; display:block; margin-bottom:4px;">Uploaded Reference Photo Link:</span>
+                     <a href="${fullPhotoUrl}" target="_blank" style="color:#38BDF8; font-size:13px; font-weight:700; text-decoration:underline; word-break:break-all;">${escapeHtml(fullPhotoUrl)}</a>
                    </div>`
                 : ''
             }
@@ -425,26 +469,26 @@ Status: Verified
       <div style="font-size:11px; text-transform:uppercase; letter-spacing:1.5px; color:#818CF8; font-weight:700;">AI Video Maker &bull; Automatic Request Dispatch</div>
       <h1 style="margin:8px 0 0; font-size:24px; color:#FFFFFF; font-weight:800;">${escapeHtml(subject)}</h1>
       <p style="margin:6px 0 0; color:#94A3B8; font-size:14px;">
-        Unique Request ID: <span style="color:#38BDF8; font-family:monospace; font-weight:700;">${request.id}</span>
+        Request ID: <span style="color:#38BDF8; font-family:monospace; font-weight:700;">${request.id}</span>
       </p>
     </div>
 
     <div style="padding:28px;">
 
-      <!-- REQUEST TYPE & PAYMENT NOTICE (EXACT REQUIREMENT) -->
+      <!-- REQUEST TYPE & CURRENT STATUS -->
       <div style="margin-bottom:24px; padding:18px; background:#131B2E; border-left:5px solid ${isTrial ? '#10B981' : '#F59E0B'}; border-radius:6px;">
         <div style="font-size:15px; font-weight:800; color:${isTrial ? '#34D399' : '#F59E0B'}; letter-spacing:0.5px;">
-          REQUEST TYPE: ${isTrial ? 'FREE TRIAL' : 'PAID VIDEO REQUEST'}
+          REQUEST TYPE: ${isTrial ? 'FREE TRIAL' : 'PAID REQUEST'}
         </div>
         <p style="margin:6px 0 0; font-size:14px; color:#FFFFFF;">
           ${
             isTrial
-              ? '✓ This customer submitted under the one-time free trial benefit. Exactly 1 free video request permitted per Google account.'
-              : '⚡ "The payment will be based on the video." Review requirements and prepare custom quote in the Admin Dashboard.'
+              ? '✓ Free Trial Request (1-Time Free Trial per registered account).'
+              : '⚡ Paid Request — "The payment will be based on the video."'
           }
         </p>
         <p style="margin:6px 0 0; font-size:13px; color:#94A3B8;">
-          <strong>Current Request Status:</strong> <span style="color:#60A5FA; font-weight:700;">${request.status}</span>
+          <strong>Current Request Status:</strong> <span style="color:#60A5FA; font-weight:700;">${escapeHtml(request.status)}</span>
         </p>
       </div>
 
@@ -453,36 +497,44 @@ Status: Verified
         <h3 style="margin:0 0 10px; font-size:13px; text-transform:uppercase; letter-spacing:1px; color:#818CF8; font-weight:700;">Customer Information</h3>
         <table style="width:100%; border-collapse:collapse; font-size:14px; background:#0B0F19; border:1px solid #1E293B; border-radius:8px; padding:12px;">
           <tr>
-            <td style="padding:8px 12px; color:#94A3B8; width:180px;">Customer Name:</td>
+            <td style="padding:8px 12px; color:#94A3B8; width:200px;">Customer Name:</td>
             <td style="padding:8px 12px; color:#FFFFFF; font-weight:700;">${escapeHtml(request.customerName)}</td>
           </tr>
           <tr>
-            <td style="padding:8px 12px; color:#94A3B8;">Verified Google Email:</td>
-            <td style="padding:8px 12px; color:#38BDF8; font-weight:700;"><a href="mailto:${escapeHtml(request.customerEmail)}" style="color:#38BDF8; text-decoration:none;">${escapeHtml(request.customerEmail)}</a></td>
+            <td style="padding:8px 12px; color:#94A3B8;">Customer Username:</td>
+            <td style="padding:8px 12px; color:#A78BFA; font-family:monospace; font-weight:700;">@${escapeHtml(customerUsername)}</td>
           </tr>
-          ${request.customerPhone ? `<tr><td style="padding:8px 12px; color:#94A3B8;">Phone / WhatsApp:</td><td style="padding:8px 12px; color:#FFFFFF;">${escapeHtml(request.customerPhone)}</td></tr>` : ''}
           <tr>
-            <td style="padding:8px 12px; color:#94A3B8;">Submission Date & Time:</td>
+            <td style="padding:8px 12px; color:#94A3B8;">Customer Email Address (Delivery):</td>
+            <td style="padding:8px 12px; color:#38BDF8; font-weight:700;">${escapeHtml(request.customerEmail)}</td>
+          </tr>
+          <tr>
+            <td style="padding:8px 12px; color:#94A3B8;">Request ID:</td>
+            <td style="padding:8px 12px; color:#38BDF8; font-family:monospace; font-weight:700;">${escapeHtml(request.id)}</td>
+          </tr>
+          <tr>
+            <td style="padding:8px 12px; color:#94A3B8;">Request Submission Date & Time:</td>
             <td style="padding:8px 12px; color:#FFFFFF;">${new Date(request.createdAt).toLocaleString()} (${new Date(request.createdAt).toUTCString()})</td>
           </tr>
+          ${request.customerPhone ? `<tr><td style="padding:8px 12px; color:#94A3B8;">Phone / WhatsApp:</td><td style="padding:8px 12px; color:#FFFFFF;">${escapeHtml(request.customerPhone)}</td></tr>` : ''}
         </table>
       </div>
 
       <!-- VIDEO SPECIFICATIONS -->
       <div style="margin-bottom:24px;">
-        <h3 style="margin:0 0 10px; font-size:13px; text-transform:uppercase; letter-spacing:1px; color:#94A3B8; font-weight:700;">Video Specifications</h3>
+        <h3 style="margin:0 0 10px; font-size:13px; text-transform:uppercase; letter-spacing:1px; color:#94A3B8; font-weight:700;">Video Specifications & Preferences</h3>
         <table style="width:100%; border-collapse:collapse; font-size:14px; background:#0B0F19; border:1px solid #1E293B; border-radius:8px;">
           <tr>
-            <td style="padding:8px 12px; color:#94A3B8; width:180px;">Video Title:</td>
+            <td style="padding:8px 12px; color:#94A3B8; width:200px;">Video Title:</td>
             <td style="padding:8px 12px; color:#FFFFFF; font-weight:700;">${escapeHtml(request.title)}</td>
           </tr>
           <tr>
-            <td style="padding:8px 12px; color:#94A3B8;">Video Style:</td>
-            <td style="padding:8px 12px; color:#FFFFFF; font-weight:600;">${escapeHtml(request.style)}${request.customStyle ? ` (${escapeHtml(request.customStyle)})` : ''}</td>
+            <td style="padding:8px 12px; color:#94A3B8;">Video Category & Style:</td>
+            <td style="padding:8px 12px; color:#FFFFFF; font-weight:600;">${escapeHtml(request.videoType || 'Custom AI Video')} &bull; ${escapeHtml(request.purpose || 'General')} &bull; ${escapeHtml(request.style)}${request.customStyle ? ` (${escapeHtml(request.customStyle)})` : ''}</td>
           </tr>
           <tr>
-            <td style="padding:8px 12px; color:#94A3B8;">Orientation / Format:</td>
-            <td style="padding:8px 12px; color:#FFFFFF;">${request.format.toUpperCase()} (${escapeHtml(request.aspectRatio)}) &mdash; ${escapeHtml(request.resolution)}</td>
+            <td style="padding:8px 12px; color:#94A3B8;">Portrait or Landscape Format:</td>
+            <td style="padding:8px 12px; color:#FFFFFF; font-weight:600;">${request.format.toUpperCase()} (${escapeHtml(request.aspectRatio)}) &mdash; ${escapeHtml(request.outputResolution || request.resolution)}</td>
           </tr>
           <tr>
             <td style="padding:8px 12px; color:#94A3B8;">Requested Duration:</td>
@@ -493,34 +545,37 @@ Status: Verified
             <td style="padding:8px 12px; color:#38BDF8; font-weight:700;">${escapeHtml(request.language || 'English')}</td>
           </tr>
           <tr>
-            <td style="padding:8px 12px; color:#94A3B8;">Purpose & Platform:</td>
-            <td style="padding:8px 12px; color:#FFFFFF;">${escapeHtml(request.purpose)} / ${escapeHtml(request.targetPlatform)}</td>
+            <td style="padding:8px 12px; color:#94A3B8;">Dialogue & Voice-Over Preferences:</td>
+            <td style="padding:8px 12px; color:#FFFFFF;">Voice-Over: ${escapeHtml(request.voiceOverPref || 'None')} &bull; Dialogue: ${escapeHtml(request.dialoguePref || 'Standard')} &bull; Subtitles: ${request.subtitles ? 'Yes' : 'No'}</td>
           </tr>
           <tr>
-            <td style="padding:8px 12px; color:#94A3B8;">Audio / Music:</td>
-            <td style="padding:8px 12px; color:#FFFFFF;">Voiceover: ${escapeHtml(request.voiceOverPref)} &bull; Music: ${escapeHtml(request.backgroundMusic)}</td>
+            <td style="padding:8px 12px; color:#94A3B8;">Music Preferences:</td>
+            <td style="padding:8px 12px; color:#FFFFFF;">Background Music: ${escapeHtml(request.backgroundMusic || 'Cinematic Ambient')} &bull; Sound Effects: ${request.soundEffects ? 'Enabled' : 'Disabled'}</td>
           </tr>
         </table>
       </div>
 
-      <!-- STORY & VIDEO IDEA -->
+      <!-- VIDEO IDEA & DESCRIPTION -->
       <div style="margin-bottom:24px;">
-        <h3 style="margin:0 0 10px; font-size:13px; text-transform:uppercase; letter-spacing:1px; color:#94A3B8; font-weight:700;">Complete Video Idea & Story</h3>
+        <h3 style="margin:0 0 10px; font-size:13px; text-transform:uppercase; letter-spacing:1px; color:#94A3B8; font-weight:700;">Video Idea & Description</h3>
         <div style="background:#090D16; padding:16px; border-radius:8px; border:1px solid #1E293B; font-size:14px; color:#E2E8F0; white-space:pre-wrap; line-height:1.7;">
-          ${escapeHtml(request.storyDescription || request.summary || 'No story narrative entered.')}
+          ${escapeHtml(request.summary || request.storyDescription || 'No summary entered.')}
         </div>
       </div>
 
-      <!-- CHARACTERS & REFERENCE PHOTOS -->
+      <!-- STORY & SCENE DESCRIPTIONS -->
       <div style="margin-bottom:24px;">
-        <h3 style="margin:0 0 10px; font-size:13px; text-transform:uppercase; letter-spacing:1px; color:#94A3B8; font-weight:700;">Characters (${request.characters.length}) & Uploaded Reference Photos</h3>
-        ${charactersHtml}
+        <h3 style="margin:0 0 10px; font-size:13px; text-transform:uppercase; letter-spacing:1px; color:#94A3B8; font-weight:700;">Story & Scene Descriptions (${request.scenes.length} Scenes)</h3>
+        <div style="background:#090D16; padding:16px; border-radius:8px; border:1px solid #1E293B; font-size:14px; color:#E2E8F0; white-space:pre-wrap; line-height:1.7; margin-bottom:12px;">
+          ${escapeHtml(request.storyDescription || request.summary || 'No story narrative entered.')}
+        </div>
+        ${scenesHtml}
       </div>
 
-      <!-- SCENE DESCRIPTIONS -->
+      <!-- CHARACTERS & UPLOADED REFERENCE PHOTO LINKS -->
       <div style="margin-bottom:24px;">
-        <h3 style="margin:0 0 10px; font-size:13px; text-transform:uppercase; letter-spacing:1px; color:#94A3B8; font-weight:700;">Scene Descriptions (${request.scenes.length})</h3>
-        ${scenesHtml}
+        <h3 style="margin:0 0 10px; font-size:13px; text-transform:uppercase; letter-spacing:1px; color:#94A3B8; font-weight:700;">Character Names, Descriptions & Uploaded Reference Photo Links (${request.characters.length})</h3>
+        ${charactersHtml}
       </div>
 
       <!-- CHARACTER DIALOGUES -->
@@ -558,51 +613,64 @@ Status: Verified
     const text = `
 ${subject}
 
-REQUEST TYPE: ${isTrial ? 'FREE TRIAL' : 'PAID VIDEO REQUEST'}
-${isTrial ? 'Covered by 1-Time Free Trial' : 'The payment will be based on the video.'}
-Current Status: ${request.status}
+1. Customer Name: ${request.customerName}
+2. Customer Username: @${customerUsername}
+3. Customer Email Address: ${request.customerEmail}
+4. Request ID: ${request.id}
+5. Request Submission Date and Time: ${request.createdAt}
+6. Video Title: ${request.title}
+7. Video Idea and Description: ${request.summary || request.storyDescription}
+8. Video Category and Style: ${request.videoType || 'Custom AI Video'} / ${request.purpose || 'General'} / ${request.style}${request.customStyle ? ` (${request.customStyle})` : ''}
+9. Portrait or Landscape Format: ${request.format.toUpperCase()} (${request.aspectRatio}) — ${request.outputResolution || request.resolution}
+10. Requested Duration: ${request.duration}${request.customDuration ? ` (${request.customDuration})` : ''}
+11. Video Language: ${request.language || 'English'}
+12. Character Names and Descriptions:
+${
+  request.characters.length > 0
+    ? request.characters
+        .map(
+          (c) =>
+            `- ${c.name} (${c.role || 'Character'}): Appearance: ${c.appearance || 'N/A'}${
+              c.clothing ? ` | Clothing: ${c.clothing}` : ''
+            }${c.actions ? ` | Actions: ${c.actions}` : ''}${c.dialogue ? ` | Dialogue: "${c.dialogue}"` : ''}`
+        )
+        .join('\n')
+    : 'None specified'
+}
+13. Uploaded Reference Photo Links:
+${
+  uploadedPhotoLinks.length > 0
+    ? uploadedPhotoLinks.map((p) => `- ${p.characterName}: ${p.url}`).join('\n')
+    : 'No reference photos uploaded'
+}
+14. Story and Scene Descriptions:
+Story: ${request.storyDescription || request.summary || 'N/A'}
+${
+  request.scenes.length > 0
+    ? request.scenes
+        .map(
+          (s) =>
+            `Scene ${s.sceneNumber} (${s.location || 'Location'}): Action: ${s.actions} | Camera: ${s.cameraMovement} | Lighting: ${s.lightingAtmosphere}`
+        )
+        .join('\n')
+    : ''
+}
+15. Dialogue and Voice-Over Preferences:
+Voice-Over: ${request.voiceOverPref || 'None'} | Dialogue Preference: ${request.dialoguePref || 'Standard'} | Subtitles: ${request.subtitles ? 'Yes' : 'No'}
+${
+  request.dialogueLines.length > 0
+    ? request.dialogueLines.map((d) => `- ${d.character}: "${d.text}" (${d.language})`).join('\n')
+    : ''
+}
+16. Music Preferences:
+Background Music: ${request.backgroundMusic || 'Cinematic Ambient'} | Sound Effects: ${request.soundEffects ? 'Yes' : 'No'}
+17. Free Trial or Paid Request Type: ${isTrial ? 'FREE TRIAL' : 'PAID REQUEST'}
+18. Current Request Status: ${request.status}
 
-CUSTOMER INFORMATION:
-Customer Name: ${request.customerName}
-Verified Google Email: ${request.customerEmail}
-Phone: ${request.customerPhone || 'N/A'}
-Submission Date and Time: ${request.createdAt}
-Unique Request ID: ${request.id}
-
-VIDEO SPECIFICATIONS:
-Title: ${request.title}
-Style: ${request.style}${request.customStyle ? ` (${request.customStyle})` : ''}
-Orientation: ${request.format.toUpperCase()} (${request.aspectRatio})
-Duration: ${request.duration}
-Language: ${request.language || 'English'}
-Purpose: ${request.purpose}
-Platform: ${request.targetPlatform}
-
-COMPLETE VIDEO IDEA AND STORY:
-${request.storyDescription || request.summary}
-
-CHARACTERS & REFERENCE PHOTOS:
-${request.characters
-  .map(
-    (c) =>
-      `- ${c.name} (${c.role}): ${c.appearance}${
-        c.referencePhotoUrl ? ` [Photo: ${baseUrl}${c.referencePhotoUrl}]` : ''
-      }`
-  )
-  .join('\n')}
-
-SCENE DESCRIPTIONS:
-${request.scenes
-  .map(
-    (s) =>
-      `Scene ${s.sceneNumber} (${s.location}): Action: ${s.actions} | Camera: ${s.cameraMovement}`
-  )
-  .join('\n')}
-
-SPECIAL INSTRUCTIONS:
+Special Instructions:
 ${request.additionalInstructions || 'None provided.'}
 
-OPEN IN ADMIN DASHBOARD:
+Open in Admin Dashboard:
 ${adminLink}
     `.trim();
 
@@ -859,7 +927,10 @@ AI Video Maker
     baseUrl: string
   ): Promise<SendResult> {
     const trackingLink = `${baseUrl}/my-requests?id=${request.id}&token=${request.accessToken}`;
-    const subject = `Your AI Video is Ready! — ${request.id}`;
+    const fullDownloadUrl = options.downloadUrl.startsWith('http')
+      ? options.downloadUrl
+      : `${baseUrl}${options.downloadUrl.startsWith('/') ? '' : '/'}${options.downloadUrl}`;
+    const subject = `Your AI Video "${request.title}" is Ready! — [${request.id}]`;
 
     const html = `
 <!DOCTYPE html>
@@ -869,15 +940,15 @@ AI Video Maker
   <div style="max-width:600px; margin:0 auto; background-color:#0F172A; border:1px solid #1E293B; border-radius:12px; overflow:hidden; box-shadow:0 10px 25px rgba(0,0,0,0.5);">
     <div style="background:linear-gradient(135deg, #065F46 0%, #0F172A 100%); padding:28px; border-bottom:1px solid #1E293B; text-align:center;">
       <div style="font-size:11px; text-transform:uppercase; letter-spacing:1.5px; color:#6EE7B7; font-weight:700;">AI Video Maker</div>
-      <h1 style="margin:8px 0 0; font-size:24px; color:#FFFFFF; font-weight:700;">Your Video is Complete!</h1>
-      <p style="margin:6px 0 0; color:#A7F3D0; font-size:14px;">Request ID: <span style="font-family:monospace; font-weight:600;">${request.id}</span></p>
+      <h1 style="margin:8px 0 0; font-size:24px; color:#FFFFFF; font-weight:700;">Your Completed AI Video is Ready!</h1>
+      <p style="margin:6px 0 0; color:#A7F3D0; font-size:14px;">Request ID: <span style="font-family:monospace; font-weight:600;">${escapeHtml(request.id)}</span></p>
     </div>
 
     <div style="padding:28px;">
       <p style="font-size:15px; color:#E2E8F0; margin-top:0;">Hello <strong>${escapeHtml(request.customerName)}</strong>,</p>
 
       <p style="font-size:14px; color:#CBD5E1;">
-        Exciting news! Production on your custom AI video <strong>"${escapeHtml(request.title)}"</strong> is complete and quality checked.
+        Exciting news! Production on your custom AI video <strong>"${escapeHtml(request.title)}"</strong> (Request ID: <strong>${escapeHtml(request.id)}</strong>) is complete and ready for download.
       </p>
 
       ${options.customMessage ? `
@@ -887,14 +958,17 @@ AI Video Maker
       </div>` : ''}
 
       <div style="text-align:center; padding:24px 0;">
-        <a href="${options.downloadUrl}" style="display:inline-block; background:linear-gradient(135deg, #10B981 0%, #059669 100%); color:#FFFFFF; text-decoration:none; padding:16px 36px; border-radius:8px; font-weight:700; font-size:16px; box-shadow:0 4px 16px rgba(16, 185, 129, 0.4);">
+        <a href="${fullDownloadUrl}" style="display:inline-block; background:linear-gradient(135deg, #10B981 0%, #059669 100%); color:#FFFFFF; text-decoration:none; padding:16px 36px; border-radius:8px; font-weight:700; font-size:16px; box-shadow:0 4px 16px rgba(16, 185, 129, 0.4);">
           Download & View Your Completed Video &rarr;
         </a>
       </div>
 
       <div style="background:#0E1726; border:1px solid #1E293B; border-radius:8px; padding:14px; font-size:13px; color:#94A3B8;">
-        <strong style="color:#E2E8F0;">Direct Link:</strong><br/>
-        <a href="${options.downloadUrl}" style="color:#38BDF8; word-break:break-all;">${escapeHtml(options.downloadUrl)}</a>
+        <p style="margin:0 0 6px;"><strong style="color:#E2E8F0;">Video Title:</strong> ${escapeHtml(request.title)}</p>
+        <p style="margin:0 0 6px;"><strong style="color:#E2E8F0;">Request ID:</strong> ${escapeHtml(request.id)}</p>
+        <p style="margin:0 0 6px;"><strong style="color:#E2E8F0;">Delivery Status:</strong> <span style="color:#34D399; font-weight:700;">Delivered</span></p>
+        <strong style="color:#E2E8F0;">Secure Video Download Link:</strong><br/>
+        <a href="${fullDownloadUrl}" style="color:#38BDF8; word-break:break-all;">${escapeHtml(fullDownloadUrl)}</a>
         ${options.expirationNote ? `<p style="margin:8px 0 0; color:#F59E0B; font-size:12px;"><strong>Notice:</strong> ${escapeHtml(options.expirationNote)}</p>` : ''}
       </div>
 
@@ -904,7 +978,7 @@ AI Video Maker
     </div>
 
     <div style="padding:16px 28px; background:#0B0F19; border-top:1px solid #1E293B; font-size:12px; color:#64748B; text-align:center;">
-      AI Video Maker &bull; Thank you for creating with us!
+      AI Video Maker &bull; Delivered to ${escapeHtml(request.customerEmail)}
     </div>
   </div>
 </body>
@@ -916,13 +990,12 @@ Hello ${request.customerName},
 
 Your AI Video "${request.title}" is ready!
 Request ID: ${request.id}
+Status: Delivered
 
-${options.customMessage ? `Studio Note: ${options.customMessage}\n\n` : ''}
-Download your video:
-${options.downloadUrl}
+${options.customMessage ? `Studio Note: ${options.customMessage}\n\n` : ''}Secure Video Download Link:
+${fullDownloadUrl}
 
 ${options.expirationNote ? `Notice: ${options.expirationNote}\n` : ''}
-
 Thank you for creating with AI Video Maker!
     `.trim();
 

@@ -104,17 +104,27 @@ export const RequestBuilder: React.FC<RequestBuilderProps> = ({
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
-  // Sync authenticated Google user into form data
+  // Sync authenticated user into form data without overwriting customer's chosen delivery email with local device placeholder
   useEffect(() => {
     if (currentUser) {
-      setFormData((prev) => ({
-        ...prev,
-        userId: currentUser.uid,
-        userEmail: currentUser.email,
-        customerEmail: currentUser.email,
-        confirmEmail: currentUser.email,
-        customerName: prev.customerName || currentUser.displayName || ''
-      }));
+      const isLocalDeviceEmail = currentUser.email?.toLowerCase().endsWith('@aivideomaker.local');
+      setFormData((prev) => {
+        const prevCleanEmail = prev.customerEmail?.toLowerCase().endsWith('@aivideomaker.local')
+          ? ''
+          : prev.customerEmail;
+        const fallbackEmail = !isLocalDeviceEmail ? (currentUser.email || '') : '';
+        const chosenEmail = prevCleanEmail || fallbackEmail;
+
+        return {
+          ...prev,
+          userId: currentUser.uid,
+          userEmail: currentUser.email,
+          customerUsername: currentUser.username || currentUser.displayName,
+          customerEmail: chosenEmail,
+          confirmEmail: chosenEmail,
+          customerName: prev.customerName || currentUser.displayName || currentUser.username || ''
+        };
+      });
     }
   }, [currentUser]);
 
@@ -137,6 +147,7 @@ export const RequestBuilder: React.FC<RequestBuilderProps> = ({
   const updateData = (fields: Partial<RequestFormData>) => {
     setFormData((prev) => ({ ...prev, ...fields }));
     setValidationError(null);
+    setSubmitError(null);
   };
 
   const stepsList = [
@@ -150,12 +161,22 @@ export const RequestBuilder: React.FC<RequestBuilderProps> = ({
     { num: 8, title: 'Review & Submit' }
   ];
 
+  const isValidDeliveryEmail = (email: string): boolean => {
+    const trimmed = (email || '').trim().toLowerCase();
+    if (!trimmed || trimmed.endsWith('@aivideomaker.local')) return false;
+    return /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(trimmed);
+  };
+
   const validateStep = (step: number): boolean => {
     setValidationError(null);
 
     if (step === 1) {
       if (!formData.title.trim()) {
         setValidationError('Please enter a descriptive title for your video request.');
+        return false;
+      }
+      if (!isValidDeliveryEmail(formData.customerEmail)) {
+        setValidationError('Please enter a valid Email Address for Video Delivery (e.g. yourname@gmail.com).');
         return false;
       }
       if (!formData.purpose.trim()) {
@@ -189,8 +210,8 @@ export const RequestBuilder: React.FC<RequestBuilderProps> = ({
         setValidationError('Please enter your full contact name.');
         return false;
       }
-      if (!formData.customerEmail.trim() || !formData.customerEmail.includes('@')) {
-        setValidationError('A valid email address is required for delivery.');
+      if (!isValidDeliveryEmail(formData.customerEmail)) {
+        setValidationError('Please enter a valid Email Address for Video Delivery.');
         return false;
       }
       if (!formData.termsAccepted) {
@@ -218,11 +239,14 @@ export const RequestBuilder: React.FC<RequestBuilderProps> = ({
   const handleResetDraft = () => {
     if (window.confirm('Reset all fields in this video request draft?')) {
       localStorage.removeItem(STORAGE_KEY);
+      const isLocalDeviceEmail = currentUser?.email?.toLowerCase().endsWith('@aivideomaker.local');
+      const defaultEmail = !isLocalDeviceEmail ? (currentUser?.email || '') : '';
       setFormData({
         ...DEFAULT_FORM_DATA,
-        customerEmail: currentUser?.email || '',
-        confirmEmail: currentUser?.email || '',
-        customerName: currentUser?.displayName || ''
+        customerEmail: defaultEmail,
+        confirmEmail: defaultEmail,
+        customerUsername: currentUser?.username || currentUser?.displayName || '',
+        customerName: currentUser?.displayName || currentUser?.username || ''
       });
       setCurrentStep(1);
       setValidationError(null);
@@ -238,15 +262,30 @@ export const RequestBuilder: React.FC<RequestBuilderProps> = ({
       }
     }
 
+    if (!isValidDeliveryEmail(formData.customerEmail)) {
+      setSubmitError('Please enter a valid Email Address for Video Delivery before submitting.');
+      return;
+    }
+
     setIsSubmitting(true);
     setSubmitError(null);
+
+    const deliveryEmail = formData.customerEmail.trim().toLowerCase();
+    const customerUsername =
+      currentUser?.username ||
+      formData.customerUsername ||
+      currentUser?.displayName ||
+      formData.customerName.trim();
 
     const submissionPayload = {
       ...formData,
       requestType: planType,
       userId: currentUser?.uid,
-      userEmail: currentUser?.email || formData.customerEmail,
-      customerEmail: currentUser?.email || formData.customerEmail
+      userEmail: currentUser?.email || deliveryEmail,
+      customerUsername,
+      customerName: formData.customerName.trim(),
+      customerEmail: deliveryEmail,
+      confirmEmail: deliveryEmail
     };
 
     try {
@@ -281,11 +320,12 @@ export const RequestBuilder: React.FC<RequestBuilderProps> = ({
         const fallbackRequest = {
           id: reqId,
           accessToken,
-          status: 'pending_review',
+          status: 'Submitted',
           requestType: planType,
           createdAt: new Date().toISOString(),
-          customerName: formData.customerName,
-          customerEmail: formData.customerEmail,
+          customerName: formData.customerName.trim(),
+          customerUsername,
+          customerEmail: deliveryEmail,
           title: formData.title,
           style: formData.style,
           aspectRatio: formData.aspectRatio,
@@ -432,6 +472,7 @@ export const RequestBuilder: React.FC<RequestBuilderProps> = ({
           {currentStep === 8 && (
             <Step8ReviewSubmit
               data={formData}
+              updateData={updateData}
               goToStep={setCurrentStep}
               onSubmit={handleSubmit}
               isSubmitting={isSubmitting}

@@ -17,6 +17,9 @@ export const Step7CustomerDelivery: React.FC<Step7Props> = ({
   onOpenTerms,
   currentUser
 }) => {
+  const isEmailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((data.customerEmail || '').trim()) &&
+    !(data.customerEmail || '').trim().toLowerCase().endsWith('@aivideomaker.local');
+
   return (
     <div className="space-y-8 animate-fadeIn">
       <div>
@@ -25,11 +28,11 @@ export const Step7CustomerDelivery: React.FC<Step7Props> = ({
           <span>Step 7: Customer Contact & Delivery Channel</span>
         </h3>
         <p className="text-sm text-slate-400">
-          Your completed video and request updates will be sent to your delivery email address.
+          Your completed video and request updates will be sent directly to your preferred delivery email address.
         </p>
       </div>
 
-      {/* Verified Account Banner */}
+      {/* Secure Delivery Banner */}
       <div className="rounded-xl bg-gradient-to-r from-indigo-950/50 via-purple-950/40 to-slate-900 border border-indigo-700/60 p-5 flex items-start gap-4">
         <div className="p-2.5 rounded-lg bg-indigo-900/60 text-cyan-300 shrink-0">
           <ShieldCheck className="w-5 h-5" />
@@ -37,14 +40,14 @@ export const Step7CustomerDelivery: React.FC<Step7Props> = ({
         <div className="text-xs sm:text-sm text-slate-300 leading-relaxed">
           <div className="flex items-center gap-2 mb-1">
             <p className="font-semibold text-white">
-              Authenticated Account Delivery
+              Direct Email Video Delivery
             </p>
             <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-950 text-emerald-300 border border-emerald-700/60 flex items-center gap-1">
               <CheckCircle2 className="w-3 h-3" />
-              Verified
+              Protected
             </span>
           </div>
-          Your completed video files, download links, and status notifications will be delivered directly to your inbox. Your account and creative briefs remain private and protected.
+          Enter any email address where you want to receive your completed AI video and secure download link. No Google Sign-in or email password is ever required.
         </div>
       </div>
 
@@ -62,30 +65,36 @@ export const Step7CustomerDelivery: React.FC<Step7Props> = ({
             className="w-full px-4 py-3 bg-[#0C1220] border border-slate-800 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-sm transition-all"
             required
           />
+          {currentUser?.username && (
+            <p className="text-[11px] text-slate-500 mt-1">
+              Signed in as device account: <span className="text-indigo-400 font-mono">@{currentUser.username}</span>
+            </p>
+          )}
         </div>
 
-        {/* Email Address (Pre-populated from Google) */}
+        {/* Mandatory Email Address for Video Delivery */}
         <div>
-          <label className="block text-sm font-semibold text-slate-200 mb-2">
-            Verified Google Email Address <span className="text-rose-400">*</span>
+          <label htmlFor="delivery-email-input" className="block text-sm font-semibold text-slate-200 mb-2">
+            Email Address for Video Delivery <span className="text-rose-400">*</span>
           </label>
           <div className="relative">
             <input
+              id="delivery-email-input"
               type="email"
               value={data.customerEmail}
               onChange={(e) => updateData({ customerEmail: e.target.value, confirmEmail: e.target.value })}
-              placeholder="e.g. yourname@gmail.com"
+              placeholder="Enter your email address"
               className="w-full px-4 py-3 bg-[#0C1220] border border-slate-800 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-sm transition-all font-mono"
               required
             />
-            {currentUser && (
-              <span className="absolute right-3 top-3 px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-950 text-indigo-300 border border-indigo-700/50">
-                Google Verified
+            {isEmailValid && (
+              <span className="absolute right-3 top-3 px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-950 text-emerald-300 border border-emerald-700/50">
+                Valid Email
               </span>
             )}
           </div>
           <p className="text-[11px] text-slate-400 mt-1.5">
-            Your completed video, director updates, and download links will be delivered here.
+            Your completed video, director updates, and secure download links will be delivered to this email address. You can edit this email anytime before submitting.
           </p>
         </div>
 
@@ -130,7 +139,7 @@ export const Step7CustomerDelivery: React.FC<Step7Props> = ({
               >
                 Privacy Policy
               </button>
-              . I understand that AI Video Maker is a human-curated video creation service where requests are reviewed, produced with AI video creation tools, and delivered to my verified email address.
+              . I understand that AI Video Maker is a human-curated video creation service where requests are reviewed, produced with AI video creation tools, and delivered to my chosen delivery email address.
             </span>
           </label>
         </div>
@@ -138,3 +147,4 @@ export const Step7CustomerDelivery: React.FC<Step7Props> = ({
     </div>
   );
 };
+

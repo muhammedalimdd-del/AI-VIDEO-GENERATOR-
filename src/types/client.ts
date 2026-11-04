@@ -158,6 +158,7 @@ export interface VideoRequestClient {
   soundEffects: boolean;
   endingText?: string;
   customerName: string;
+  customerUsername?: string;
   customerEmail: string;
   customerPhone?: string;
   emailNotifications: boolean;
@@ -172,6 +173,7 @@ export interface RequestFormData {
   // Account & Trial
   userId?: string;
   userEmail?: string;
+  customerUsername?: string;
   requestType: 'free_trial' | 'paid';
 
   // Step 1: Basic

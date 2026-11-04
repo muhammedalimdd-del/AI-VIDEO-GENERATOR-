@@ -20,6 +20,7 @@ import {
 
 interface Step8Props {
   data: RequestFormData;
+  updateData?: (fields: Partial<RequestFormData>) => void;
   goToStep: (stepNumber: number) => void;
   onSubmit: (requestType: 'free_trial' | 'paid') => void;
   isSubmitting: boolean;
@@ -29,6 +30,7 @@ interface Step8Props {
 
 export const Step8ReviewSubmit: React.FC<Step8Props> = ({
   data,
+  updateData,
   goToStep,
   onSubmit,
   isSubmitting,
@@ -52,7 +54,7 @@ export const Step8ReviewSubmit: React.FC<Step8Props> = ({
           <span>Step 8: Review & Submit Video Request</span>
         </h3>
         <p className="text-sm text-slate-400">
-          Review your creative brief and choose your submission option.
+          Review your creative brief, confirm your delivery email address, and choose your submission option.
         </p>
       </div>
 
@@ -183,31 +185,50 @@ export const Step8ReviewSubmit: React.FC<Step8Props> = ({
           </div>
         </div>
 
-        {/* Delivery Contact Information */}
-        <div className="rounded-xl bg-[#0C1220] border border-slate-800 p-5">
+        {/* Delivery Contact Information (Editable directly before submitting) */}
+        <div className="rounded-xl bg-[#0C1220] border border-indigo-500/40 p-5">
           <div className="flex items-center justify-between pb-3 mb-3 border-b border-slate-800">
             <span className="text-xs font-bold uppercase tracking-wider text-indigo-400 flex items-center gap-1.5">
               <Mail className="w-3.5 h-3.5" />
-              5. Delivery & Google Account
+              5. Customer Contact & Delivery Channel
             </span>
             <button
               type="button"
               onClick={() => goToStep(7)}
               className="text-xs text-indigo-400 hover:text-white flex items-center gap-1 font-semibold cursor-pointer"
             >
-              <Edit3 className="w-3 h-3" /> Edit
+              <Edit3 className="w-3 h-3" /> Step 7 Details
             </button>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs text-slate-300">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs text-slate-300">
             <div>
-              <span className="text-slate-400">Contact Name:</span>{' '}
-              <span className="text-white font-semibold">{data.customerName}</span>
+              <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                Customer Name <span className="text-rose-400">*</span>
+              </label>
+              <input
+                type="text"
+                value={data.customerName}
+                onChange={(e) => updateData?.({ customerName: e.target.value })}
+                placeholder="Your contact name"
+                className="w-full px-3.5 py-2.5 bg-[#080D1A] border border-slate-700 rounded-xl text-white text-xs focus:outline-none focus:border-indigo-500"
+              />
             </div>
             <div>
-              <span className="text-slate-400">Delivery Email:</span>{' '}
-              <span className="text-indigo-400 font-mono font-semibold">{data.customerEmail}</span>
+              <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                Email Address for Video Delivery <span className="text-rose-400">*</span>
+              </label>
+              <input
+                type="email"
+                value={data.customerEmail}
+                onChange={(e) => updateData?.({ customerEmail: e.target.value, confirmEmail: e.target.value })}
+                placeholder="Enter your email address"
+                className="w-full px-3.5 py-2.5 bg-[#080D1A] border border-slate-700 rounded-xl text-indigo-300 font-mono text-xs focus:outline-none focus:border-indigo-500"
+              />
             </div>
           </div>
+          <p className="text-[11px] text-slate-400 mt-2.5">
+            Your completed video download link will be sent to <strong className="text-indigo-300 font-mono">{data.customerEmail || 'your delivery email address'}</strong>.
+          </p>
         </div>
       </div>
 
@@ -256,9 +277,9 @@ export const Step8ReviewSubmit: React.FC<Step8Props> = ({
               </p>
 
               <div className="mt-4 pt-3 border-t border-slate-800/80 text-[11px] text-emerald-400/90 font-medium space-y-1">
-                <p>✓ Exactly 1 free video request per Google account</p>
+                <p>✓ Exactly 1 free video request per registered account</p>
                 <p>✓ Human-curated AI video generation</p>
-                <p>✓ Delivered directly to your verified Gmail</p>
+                <p>✓ Delivered directly to your chosen email address</p>
               </div>
 
               <div className="mt-5">
