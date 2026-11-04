@@ -53,7 +53,7 @@ export const HowItWorksSection: React.FC<HowItWorksProps> = ({ onRequestClick })
             Simple 5-Step Process
           </h2>
           <h3 className="text-3xl sm:text-4xl font-black text-white tracking-tight">
-            How AI Video Maker Works
+            How ZENVORA Works
           </h3>
           <p className="mt-4 text-sm sm:text-base text-slate-300">
             From your concept to finished video delivery, follow our transparent human-curated workflow.

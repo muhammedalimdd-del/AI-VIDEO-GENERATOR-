@@ -24,7 +24,7 @@ export const PrivacyModal: React.FC<ModalProps> = ({ isOpen, onClose }) => {
 
         <div className="p-6 overflow-y-auto text-xs sm:text-sm text-slate-300 space-y-4 leading-relaxed">
           <p>
-            At <strong>AI Video Request Studio</strong>, your creative concepts, personal details, and reference photos are treated with the highest degree of confidentiality and technical protection.
+            At <strong>ZENVORA</strong>, your creative concepts, personal details, and reference photos are treated with the highest degree of confidentiality and technical protection.
           </p>
 
           <h4 className="font-bold text-white text-sm">1. Customer Information We Collect</h4>
@@ -76,7 +76,7 @@ export const TermsModal: React.FC<ModalProps> = ({ isOpen, onClose }) => {
         <div className="p-6 overflow-y-auto text-xs sm:text-sm text-slate-300 space-y-4 leading-relaxed">
           <h4 className="font-bold text-white text-sm">1. Production Workflow & Feasibility</h4>
           <p>
-            AI Video Request Studio produces custom, human-directed AI video renders according to the customer's submitted creative brief. All submitted briefs undergo director review for feasibility, technical coherence, and compliance with ethical guidelines.
+            ZENVORA produces custom, human-directed AI video renders according to the customer's submitted creative brief. All submitted briefs undergo director review for feasibility, technical coherence, and compliance with ethical guidelines.
           </p>
 
           <h4 className="font-bold text-white text-sm">2. Realistic Delivery Expectations</h4>
@@ -206,6 +206,7 @@ export const DataDeletionModal: React.FC<ModalProps> = ({ isOpen, onClose }) => 
 export const ContactModal: React.FC<ModalProps> = ({ isOpen, onClose }) => {
   const [submitted, setSubmitted] = useState(false);
   const [isSending, setIsSending] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [message, setMessage] = useState('');
@@ -214,10 +215,15 @@ export const ContactModal: React.FC<ModalProps> = ({ isOpen, onClose }) => {
 
   const handleContactSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim() || !email.trim() || !message.trim()) return;
+    if (isSending) return;
+    if (!name.trim() || !email.trim() || !message.trim()) {
+      setSubmitError('Please fill in your name, email, and message.');
+      return;
+    }
     setIsSending(true);
+    setSubmitError(null);
     try {
-      await safeFetchJson('/api/budget-requests', {
+      const res = await safeFetchJson<{ budgetRequest?: any; error?: string }>('/api/budget-requests', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -231,25 +237,16 @@ export const ContactModal: React.FC<ModalProps> = ({ isOpen, onClose }) => {
         })
       });
 
-      // Non-blocking browser relay to muhammedalimdd@gmail.com
-      fetch('https://formsubmit.co/ajax/muhammedalimdd@gmail.com', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({
-          _subject: `NEW AI VIDEO REQUEST — ${name.trim().toUpperCase()} — STUDIO CONTACT`,
-          _template: 'table',
-          _captcha: 'false',
-          Customer_Name: name.trim(),
-          Customer_Email: email.trim().toLowerCase(),
-          Inquiry_Message: message.trim(),
-          Submitted_At: new Date().toUTCString()
-        })
-      }).catch(() => {});
-    } catch {
-      // Fallback handled gracefully
+      if (!res.ok && res.data?.error) {
+        setSubmitError(res.data.error);
+        return;
+      }
+
+      setSubmitted(true);
+    } catch (err: any) {
+      setSubmitError(err.message || 'Unable to submit inquiry right now. Please try again.');
     } finally {
       setIsSending(false);
-      setSubmitted(true);
     }
   };
 
@@ -271,11 +268,12 @@ export const ContactModal: React.FC<ModalProps> = ({ isOpen, onClose }) => {
             <CheckCircle2 className="w-10 h-10 text-emerald-400 mx-auto" />
             <h4 className="text-base font-bold text-white">Request Sent to muhammedalimdd@gmail.com</h4>
             <p className="text-xs text-slate-300 max-w-xs mx-auto">
-              Thank you for getting in touch. Your inquiry has been forwarded to our studio inbox (<span className="text-indigo-300 font-mono">muhammedalimdd@gmail.com</span>) and we will reply to <span className="text-white">{email}</span>.
+              Thank you for getting in touch. Your inquiry has been forwarded via Resend to our studio inbox (<span className="text-indigo-300 font-mono">muhammedalimdd@gmail.com</span>) and we will reply to <span className="text-white">{email}</span>.
             </p>
             <button
               onClick={() => {
                 setSubmitted(false);
+                setSubmitError(null);
                 setName('');
                 setEmail('');
                 setMessage('');
@@ -291,6 +289,12 @@ export const ContactModal: React.FC<ModalProps> = ({ isOpen, onClose }) => {
             <p className="text-xs text-slate-400">
               Have questions about enterprise production, commercial rights, or custom AI video requests? Your inquiry is sent directly to <span className="text-indigo-300 font-mono">muhammedalimdd@gmail.com</span>.
             </p>
+
+            {submitError && (
+              <div className="p-2.5 rounded-lg bg-red-950/50 border border-red-800 text-red-300 text-xs">
+                {submitError}
+              </div>
+            )}
 
             <div>
               <label className="block text-xs font-semibold text-slate-300 mb-1">

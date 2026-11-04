@@ -189,7 +189,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
               className="w-full py-2 px-4 rounded-xl text-xs font-semibold text-rose-300 hover:text-rose-200 hover:bg-rose-950/40 transition-all flex items-center justify-center gap-2 cursor-pointer mt-1"
             >
               <LogOut className="w-3.5 h-3.5 text-rose-400" />
-              <span>Sign Out of AI Video Maker</span>
+              <span>Sign Out of ZENVORA</span>
             </button>
           </div>
         </div>

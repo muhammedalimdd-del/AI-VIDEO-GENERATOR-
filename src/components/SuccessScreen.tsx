@@ -28,6 +28,14 @@ interface SuccessScreenProps {
     duration?: string;
     format?: string;
     aspectRatio?: string;
+    emailNotification?: {
+      sent?: boolean;
+      status?: string;
+      provider?: string;
+      error?: string;
+      duplicatePrevented?: boolean;
+    };
+    notificationMessage?: string;
   };
   onTrack: (id: string, token: string) => void;
   onHome: () => void;
@@ -161,11 +169,19 @@ export const SuccessScreen: React.FC<SuccessScreenProps> = ({
           <div className="flex items-start gap-3">
             <Mail className="w-4 h-4 text-cyan-400 shrink-0 mt-0.5" />
             <div className="space-y-1">
-              <p className="font-semibold text-white">Request Routed to Studio Owner Gmail</p>
+              <p className="font-semibold text-white">
+                {request.emailNotification?.sent
+                  ? 'Automatic Resend Email Notification Sent to Studio Owner'
+                  : 'Request Routed to Studio Owner Gmail'}
+              </p>
               <p className="text-slate-400">
-                Your request notification has been dispatched to{' '}
-                <strong className="text-indigo-300 font-mono">muhammedalimdd@gmail.com</strong> and your completed video will be delivered to{' '}
-                <strong className="text-slate-200">{request.customerEmail}</strong>.
+                {request.notificationMessage || (
+                  <>
+                    Your request notification has been dispatched via Resend to{' '}
+                    <strong className="text-indigo-300 font-mono">muhammedalimdd@gmail.com</strong> and your completed video will be delivered to{' '}
+                    <strong className="text-slate-200">{request.customerEmail}</strong>.
+                  </>
+                )}
               </p>
             </div>
           </div>

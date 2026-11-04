@@ -133,7 +133,7 @@ export const Footer: React.FC<FooterProps> = ({
         {/* Bottom bar */}
         <div className="pt-8 border-t border-slate-800/80 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-400">
           <p>
-            &copy; {new Date().getFullYear()} AI Video Maker. All creative briefs and reference assets handled confidentially.
+            &copy; {new Date().getFullYear()} ZENVORA. All creative briefs and reference assets handled confidentially.
           </p>
           <div className="flex items-center gap-1 text-slate-400">
             <span>The payment will be based on the video · 1-Time Free Trial for Eligible Accounts</span>

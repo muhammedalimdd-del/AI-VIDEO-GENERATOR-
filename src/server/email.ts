@@ -1,4 +1,5 @@
 import nodemailer from 'nodemailer';
+import { Resend } from 'resend';
 import { VideoRequest, BudgetRequest, EmailLog, QuoteDetails } from './types.ts';
 import { db } from './db.ts';
 
@@ -7,18 +8,71 @@ export const OWNER_GMAIL_ADDRESS = 'muhammedalimdd@gmail.com';
 export interface SendResult {
   success: boolean;
   status: 'sent' | 'simulated' | 'failed';
+  provider?: 'resend' | 'smtp' | 'sendgrid' | 'none';
+  emailId?: string;
+  duplicatePrevented?: boolean;
   error?: string;
   emailLogId: string;
 }
 
 export class EmailService {
+  // Tracks in-flight and completed owner notifications to prevent duplicate emails for the same requestId
+  private inFlightLock = new Set<string>();
+  private deliveredOwnerRequestKeys = new Set<string>();
+
   /**
-   * Builds an authenticated nodemailer Transporter based on database settings or environment variables.
-   * Supports Google / Gmail App Password, Custom SMTP, or falls back to API providers.
+   * Resolves the server-side Resend API Key from environment variables or server settings.
+   * Never exposed to client code.
+   */
+  public getResendApiKey(): string | undefined {
+    const settings = db.getSettings();
+    const envKey = (
+      process.env.RESEND_API_KEY ||
+      process.env.EMAIL_PROVIDER_API_KEY ||
+      settings.apiKey ||
+      ''
+    ).trim();
+    return envKey.length > 0 ? envKey : undefined;
+  }
+
+  /**
+   * Resolves a valid Resend 'from' address.
+   * Public consumer domains (@gmail.com, @yahoo.com, @outlook.com, @hotmail.com) cannot be verified in Resend DNS,
+   * so we automatically use Resend's official verified sender 'ZENVORA <onboarding@resend.dev>' unless a custom domain is set.
+   */
+  private getResendFromAddress(): string {
+    const settings = db.getSettings();
+    const candidate = (
+      process.env.RESEND_FROM_EMAIL ||
+      process.env.EMAIL_FROM_ADDRESS ||
+      settings.emailFromAddress ||
+      ''
+    ).trim();
+
+    if (!candidate) {
+      return 'ZENVORA <onboarding@resend.dev>';
+    }
+
+    const lower = candidate.toLowerCase();
+    if (
+      lower.includes('@gmail.com') ||
+      lower.includes('@yahoo.com') ||
+      lower.includes('@outlook.com') ||
+      lower.includes('@hotmail.com') ||
+      lower.includes('@icloud.com')
+    ) {
+      return 'ZENVORA <onboarding@resend.dev>';
+    }
+
+    return candidate.includes('<') ? candidate : `ZENVORA <${candidate}>`;
+  }
+
+  /**
+   * Builds an authenticated nodemailer Transporter if SMTP is configured as a fallback.
    */
   private getTransporter() {
     const settings = db.getSettings();
-    const provider = settings.emailProvider || 'gmail';
+    const provider = settings.emailProvider || 'resend';
 
     const host = settings.smtpHost || process.env.SMTP_HOST || (provider === 'gmail' ? 'smtp.gmail.com' : undefined);
     const port = settings.smtpPort || parseInt(process.env.SMTP_PORT || (provider === 'gmail' ? '465' : '587'), 10);
@@ -47,8 +101,82 @@ export class EmailService {
   }
 
   /**
-   * Dispatches email using SMTP, Resend API, SendGrid API, or FormSubmit relay for owner notifications.
-   * Logs every email in Email Logs so it is always stored and retryable.
+   * Sends an email via the official Resend SDK (with automatic fallback to onboarding@resend.dev if custom domain is unverified).
+   */
+  private async sendViaResend(
+    apiKey: string,
+    params: {
+      to: string;
+      subject: string;
+      html: string;
+      text: string;
+      replyTo?: string;
+      idempotencyKey?: string;
+    }
+  ): Promise<{ ok: boolean; id?: string; error?: string }> {
+    const resend = new Resend(apiKey);
+    const primaryFrom = this.getResendFromAddress();
+
+    try {
+      const payload: any = {
+        from: primaryFrom,
+        to: [params.to],
+        subject: params.subject,
+        html: params.html,
+        text: params.text
+      };
+      if (params.replyTo && params.replyTo.includes('@')) {
+        payload.replyTo = params.replyTo;
+      }
+
+      const headers: Record<string, string> = {};
+      if (params.idempotencyKey) {
+        headers['Idempotency-Key'] = params.idempotencyKey;
+      }
+
+      const { data, error } = await resend.emails.send(
+        payload,
+        Object.keys(headers).length > 0 ? { headers } : undefined
+      );
+
+      if (!error && data?.id) {
+        return { ok: true, id: data.id };
+      }
+
+      // If custom domain is not verified yet, retry once with onboarding@resend.dev
+      if (
+        error &&
+        primaryFrom !== 'ZENVORA <onboarding@resend.dev>' &&
+        /domain|verify|not verified|sender/i.test(error.message || '')
+      ) {
+        const retryResult = await resend.emails.send({
+          ...payload,
+          from: 'ZENVORA <onboarding@resend.dev>'
+        });
+        if (!retryResult.error && retryResult.data?.id) {
+          return { ok: true, id: retryResult.data.id };
+        }
+        return {
+          ok: false,
+          error: retryResult.error?.message || error.message || 'Resend API delivery error'
+        };
+      }
+
+      return {
+        ok: false,
+        error: error?.message || 'Resend API rejected the request'
+      };
+    } catch (err: any) {
+      return {
+        ok: false,
+        error: err?.message || 'Resend API network error'
+      };
+    }
+  }
+
+  /**
+   * Dispatches email using Resend API (primary), or SMTP / SendGrid fallback.
+   * Enforces idempotency / duplicate-prevention for owner request notifications.
    */
   public async dispatchEmail(options: {
     requestId: string;
@@ -57,154 +185,202 @@ export class EmailService {
     subject: string;
     html: string;
     text: string;
+    replyTo?: string;
+    forceRetry?: boolean;
   }): Promise<SendResult> {
-    const settings = db.getSettings();
-    const fromAddress =
-      process.env.EMAIL_FROM_ADDRESS || settings.emailFromAddress || settings.ownerNotificationEmail || OWNER_GMAIL_ADDRESS;
-    const transporter = this.getTransporter();
+    const dedupKey = `${options.requestId}:${options.type}:${options.to.toLowerCase()}`;
+    const isOwnerNotification =
+      options.type === 'owner_new_request' || options.type === 'budget_request_owner';
 
-    // First save the log entry with initial pending state
-    const log = db.logEmail({
-      requestId: options.requestId,
-      type: options.type,
-      recipient: options.to,
-      subject: options.subject,
-      status: 'failed',
-      htmlBody: options.html,
-      textBody: options.text,
-      error: undefined
-    });
+    // Prevent duplicate owner notification emails for the same request
+    if (isOwnerNotification && !options.forceRetry) {
+      if (this.inFlightLock.has(dedupKey) || this.deliveredOwnerRequestKeys.has(dedupKey)) {
+        const existingLog = db
+          .getEmailLogs()
+          .find((l) => l.requestId === options.requestId && l.type === options.type);
+        return {
+          success: true,
+          status: 'sent',
+          provider: 'resend',
+          duplicatePrevented: true,
+          emailLogId: existingLog?.id || ''
+        };
+      }
 
-    // 1. Try SMTP (Gmail or custom SMTP)
-    if (transporter) {
-      try {
-        await transporter.sendMail({
-          from: `"AI Video Maker" <${fromAddress}>`,
+      const alreadySentLog = db
+        .getEmailLogs()
+        .find(
+          (l) =>
+            l.requestId === options.requestId &&
+            l.type === options.type &&
+            l.status === 'sent'
+        );
+      if (alreadySentLog) {
+        this.deliveredOwnerRequestKeys.add(dedupKey);
+        return {
+          success: true,
+          status: 'sent',
+          provider: 'resend',
+          duplicatePrevented: true,
+          emailLogId: alreadySentLog.id
+        };
+      }
+    }
+
+    this.inFlightLock.add(dedupKey);
+
+    try {
+      const settings = db.getSettings();
+      const fromAddress =
+        process.env.EMAIL_FROM_ADDRESS ||
+        settings.emailFromAddress ||
+        settings.ownerNotificationEmail ||
+        OWNER_GMAIL_ADDRESS;
+
+      // Save the log entry in the database
+      const log = db.logEmail({
+        requestId: options.requestId,
+        type: options.type,
+        recipient: options.to,
+        subject: options.subject,
+        status: 'failed',
+        htmlBody: options.html,
+        textBody: options.text,
+        error: undefined
+      });
+
+      // 1. PRIMARY: Resend API (server-side RESEND_API_KEY)
+      const resendApiKey = this.getResendApiKey();
+      if (resendApiKey && (! resendApiKey.startsWith('SG.'))) {
+        const idempotencyKey = options.forceRetry
+          ? `${options.requestId}-${options.type}-retry-${Date.now()}`
+          : `${options.requestId}-${options.type}`;
+
+        const resendResult = await this.sendViaResend(resendApiKey, {
           to: options.to,
           subject: options.subject,
+          html: options.html,
           text: options.text,
-          html: options.html
+          replyTo: options.replyTo,
+          idempotencyKey
         });
 
-        db.updateEmailLog(log.id, { status: 'sent', error: undefined });
-        return { success: true, status: 'sent', emailLogId: log.id };
-      } catch (err: any) {
-        const errorMsg = err.message || 'SMTP transmission error';
-        console.error('Failed to send email via SMTP:', errorMsg);
-        db.updateEmailLog(log.id, { status: 'failed', error: errorMsg });
-        return { success: false, status: 'failed', error: errorMsg, emailLogId: log.id };
-      }
-    }
-
-    // 2. Try Resend API
-    const apiKey = settings.apiKey || process.env.EMAIL_PROVIDER_API_KEY || process.env.RESEND_API_KEY;
-    if (apiKey && (apiKey.startsWith('re_') || settings.emailProvider === 'resend')) {
-      try {
-        const res = await fetch('https://api.resend.com/emails', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${apiKey}`
-          },
-          body: JSON.stringify({
-            from: `AI Video Maker <${fromAddress}>`,
-            to: [options.to],
-            subject: options.subject,
-            html: options.html,
-            text: options.text
-          })
-        });
-
-        if (res.ok) {
+        if (resendResult.ok) {
+          this.deliveredOwnerRequestKeys.add(dedupKey);
           db.updateEmailLog(log.id, { status: 'sent', error: undefined });
-          return { success: true, status: 'sent', emailLogId: log.id };
+          return {
+            success: true,
+            status: 'sent',
+            provider: 'resend',
+            emailId: resendResult.id,
+            emailLogId: log.id
+          };
         } else {
-          const errJson = await res.json().catch(() => ({ message: res.statusText }));
-          const errMsg = errJson.message || 'Resend API error';
+          const errMsg = `Resend API Error: ${resendResult.error}`;
           db.updateEmailLog(log.id, { status: 'failed', error: errMsg });
-          return { success: false, status: 'failed', error: errMsg, emailLogId: log.id };
+          // If SMTP is not configured as fallback, return the Resend error clearly
+          if (!this.getTransporter()) {
+            return {
+              success: false,
+              status: 'failed',
+              provider: 'resend',
+              error: errMsg,
+              emailLogId: log.id
+            };
+          }
         }
-      } catch (e: any) {
-        db.updateEmailLog(log.id, { status: 'failed', error: e.message });
-        return { success: false, status: 'failed', error: e.message, emailLogId: log.id };
       }
-    }
 
-    // 3. Try SendGrid API
-    if (apiKey && (apiKey.startsWith('SG.') || settings.emailProvider === 'sendgrid')) {
-      try {
-        const res = await fetch('https://api.sendgrid.com/v3/mail/send', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${apiKey}`
-          },
-          body: JSON.stringify({
-            personalizations: [{ to: [{ email: options.to }] }],
-            from: { email: fromAddress, name: 'AI Video Maker' },
+      // 2. SECONDARY FALLBACK: SMTP (if configured on server)
+      const transporter = this.getTransporter();
+      if (transporter) {
+        try {
+          await transporter.sendMail({
+            from: `"ZENVORA" <${fromAddress}>`,
+            to: options.to,
+            replyTo: options.replyTo,
             subject: options.subject,
-            content: [
-              { type: 'text/plain', value: options.text },
-              { type: 'text/html', value: options.html }
-            ]
-          })
-        });
+            text: options.text,
+            html: options.html
+          });
 
-        if (res.status >= 200 && res.status < 300) {
+          this.deliveredOwnerRequestKeys.add(dedupKey);
           db.updateEmailLog(log.id, { status: 'sent', error: undefined });
-          return { success: true, status: 'sent', emailLogId: log.id };
-        } else {
-          const errMsg = `SendGrid error status: ${res.status} ${res.statusText}`;
-          db.updateEmailLog(log.id, { status: 'failed', error: errMsg });
-          return { success: false, status: 'failed', error: errMsg, emailLogId: log.id };
+          return {
+            success: true,
+            status: 'sent',
+            provider: 'smtp',
+            emailLogId: log.id
+          };
+        } catch (err: any) {
+          const errorMsg = err.message || 'SMTP transmission error';
+          db.updateEmailLog(log.id, { status: 'failed', error: errorMsg });
+          return {
+            success: false,
+            status: 'failed',
+            provider: 'smtp',
+            error: errorMsg,
+            emailLogId: log.id
+          };
         }
-      } catch (e: any) {
-        db.updateEmailLog(log.id, { status: 'failed', error: e.message });
-        return { success: false, status: 'failed', error: e.message, emailLogId: log.id };
       }
-    }
 
-    // 4. Fast FormSubmit Relay attempt when delivering to muhammedalimdd@gmail.com
-    if (options.to.toLowerCase().includes(OWNER_GMAIL_ADDRESS)) {
-      try {
-        const relayRes = await fetch(`https://formsubmit.co/ajax/${OWNER_GMAIL_ADDRESS}`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Accept: 'application/json'
-          },
-          body: JSON.stringify({
-            _subject: options.subject,
-            _template: 'table',
-            _captcha: 'false',
-            request_id: options.requestId,
-            recipient: OWNER_GMAIL_ADDRESS,
-            message: options.text
-          }),
-          signal: AbortSignal.timeout(2500)
-        });
+      // 3. TERTIARY FALLBACK: SendGrid API (if SENDGRID_API_KEY is set)
+      const sendgridKey = process.env.SENDGRID_API_KEY || (resendApiKey?.startsWith('SG.') ? resendApiKey : undefined);
+      if (sendgridKey) {
+        try {
+          const res = await fetch('https://api.sendgrid.com/v3/mail/send', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${sendgridKey}`
+            },
+            body: JSON.stringify({
+              personalizations: [{ to: [{ email: options.to }] }],
+              from: { email: fromAddress, name: 'ZENVORA' },
+              subject: options.subject,
+              content: [
+                { type: 'text/plain', value: options.text },
+                { type: 'text/html', value: options.html }
+              ]
+            })
+          });
 
-        if (relayRes.ok) {
-          db.updateEmailLog(log.id, { status: 'sent', error: undefined });
-          return { success: true, status: 'sent', emailLogId: log.id };
+          if (res.status >= 200 && res.status < 300) {
+            this.deliveredOwnerRequestKeys.add(dedupKey);
+            db.updateEmailLog(log.id, { status: 'sent', error: undefined });
+            return {
+              success: true,
+              status: 'sent',
+              provider: 'sendgrid',
+              emailLogId: log.id
+            };
+          }
+        } catch {
+          // fall through
         }
-      } catch {
-        // Ignore timeout/network error on external relay and record in email queue
       }
-    }
 
-    // No credentials configured: record in email queue so it can be retried or opened in Gmail
-    const unconfiguredMsg =
-      'Queued for muhammedalimdd@gmail.com: Configure Gmail App Password in Admin Settings > Email Configuration for automatic SMTP, or click "Retry" / "Open in Gmail".';
-    db.updateEmailLog(log.id, {
-      status: 'failed',
-      error: unconfiguredMsg
-    });
-    return { success: false, status: 'failed', error: unconfiguredMsg, emailLogId: log.id };
+      const unconfiguredMsg =
+        'Resend API key is not configured. Set RESEND_API_KEY in server environment variables (.env) or Admin Settings > Email Configuration to enable automatic Resend delivery to muhammedalimdd@gmail.com.';
+      db.updateEmailLog(log.id, {
+        status: 'failed',
+        error: unconfiguredMsg
+      });
+      return {
+        success: false,
+        status: 'failed',
+        provider: 'none',
+        error: unconfiguredMsg,
+        emailLogId: log.id
+      };
+    } finally {
+      this.inFlightLock.delete(dedupKey);
+    }
   }
 
   /**
-   * Retries sending a previously logged email.
+   * Retries sending a previously logged email via Resend API (or fallback provider).
    */
   public async retryEmail(emailLogId: string): Promise<SendResult> {
     const log = db.getEmailLogById(emailLogId);
@@ -212,15 +388,55 @@ export class EmailService {
       return { success: false, status: 'failed', error: 'Email log not found', emailLogId };
     }
 
+    const resendApiKey = this.getResendApiKey();
+    if (resendApiKey && !resendApiKey.startsWith('SG.')) {
+      const resendResult = await this.sendViaResend(resendApiKey, {
+        to: log.recipient,
+        subject: log.subject,
+        html: log.htmlBody,
+        text: log.textBody,
+        idempotencyKey: `retry-${log.id}-${Date.now()}`
+      });
+
+      if (resendResult.ok) {
+        db.updateEmailLog(log.id, {
+          status: 'sent',
+          error: undefined,
+          sentAt: new Date().toISOString()
+        });
+        return {
+          success: true,
+          status: 'sent',
+          provider: 'resend',
+          emailId: resendResult.id,
+          emailLogId: log.id
+        };
+      } else {
+        const errMsg = `Resend API retry error: ${resendResult.error}`;
+        db.updateEmailLog(log.id, {
+          status: 'failed',
+          error: errMsg,
+          sentAt: new Date().toISOString()
+        });
+        return {
+          success: false,
+          status: 'failed',
+          provider: 'resend',
+          error: errMsg,
+          emailLogId: log.id
+        };
+      }
+    }
+
     const settings = db.getSettings();
     const fromAddress =
-      process.env.EMAIL_FROM_ADDRESS || settings.emailFromAddress || settings.ownerNotificationEmail || 'muhammedalimdd@gmail.com';
+      process.env.EMAIL_FROM_ADDRESS || settings.emailFromAddress || settings.ownerNotificationEmail || OWNER_GMAIL_ADDRESS;
     const transporter = this.getTransporter();
 
     if (transporter) {
       try {
         await transporter.sendMail({
-          from: `"AI Video Maker" <${fromAddress}>`,
+          from: `"ZENVORA" <${fromAddress}>`,
           to: log.recipient,
           subject: log.subject,
           text: log.textBody,
@@ -228,84 +444,18 @@ export class EmailService {
         });
 
         db.updateEmailLog(log.id, { status: 'sent', error: undefined, sentAt: new Date().toISOString() });
-        return { success: true, status: 'sent', emailLogId: log.id };
+        return { success: true, status: 'sent', provider: 'smtp', emailLogId: log.id };
       } catch (err: any) {
         const errorMsg = err.message || 'SMTP retry error';
         db.updateEmailLog(log.id, { status: 'failed', error: errorMsg, sentAt: new Date().toISOString() });
-        return { success: false, status: 'failed', error: errorMsg, emailLogId: log.id };
+        return { success: false, status: 'failed', provider: 'smtp', error: errorMsg, emailLogId: log.id };
       }
     }
 
-    const apiKey = settings.apiKey || process.env.EMAIL_PROVIDER_API_KEY || process.env.RESEND_API_KEY;
-    if (apiKey && (apiKey.startsWith('re_') || settings.emailProvider === 'resend')) {
-      try {
-        const res = await fetch('https://api.resend.com/emails', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${apiKey}`
-          },
-          body: JSON.stringify({
-            from: `AI Video Maker <${fromAddress}>`,
-            to: [log.recipient],
-            subject: log.subject,
-            html: log.htmlBody,
-            text: log.textBody
-          })
-        });
-
-        if (res.ok) {
-          db.updateEmailLog(log.id, { status: 'sent', error: undefined, sentAt: new Date().toISOString() });
-          return { success: true, status: 'sent', emailLogId: log.id };
-        } else {
-          const errJson = await res.json().catch(() => ({ message: res.statusText }));
-          const errMsg = errJson.message || 'Resend API retry error';
-          db.updateEmailLog(log.id, { status: 'failed', error: errMsg, sentAt: new Date().toISOString() });
-          return { success: false, status: 'failed', error: errMsg, emailLogId: log.id };
-        }
-      } catch (e: any) {
-        db.updateEmailLog(log.id, { status: 'failed', error: e.message, sentAt: new Date().toISOString() });
-        return { success: false, status: 'failed', error: e.message, emailLogId: log.id };
-      }
-    }
-
-    const sendgridKey = settings.apiKey || process.env.SENDGRID_API_KEY || process.env.EMAIL_PROVIDER_API_KEY;
-    if (sendgridKey && (sendgridKey.startsWith('SG.') || settings.emailProvider === 'sendgrid')) {
-      try {
-        const res = await fetch('https://api.sendgrid.com/v3/mail/send', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${sendgridKey}`
-          },
-          body: JSON.stringify({
-            personalizations: [{ to: [{ email: log.recipient }] }],
-            from: { email: fromAddress, name: 'AI Video Maker' },
-            subject: log.subject,
-            content: [
-              { type: 'text/plain', value: log.textBody },
-              { type: 'text/html', value: log.htmlBody }
-            ]
-          })
-        });
-
-        if (res.status >= 200 && res.status < 300) {
-          db.updateEmailLog(log.id, { status: 'sent', error: undefined, sentAt: new Date().toISOString() });
-          return { success: true, status: 'sent', emailLogId: log.id };
-        } else {
-          const errMsg = `SendGrid retry error status: ${res.status} ${res.statusText}`;
-          db.updateEmailLog(log.id, { status: 'failed', error: errMsg, sentAt: new Date().toISOString() });
-          return { success: false, status: 'failed', error: errMsg, emailLogId: log.id };
-        }
-      } catch (e: any) {
-        db.updateEmailLog(log.id, { status: 'failed', error: e.message, sentAt: new Date().toISOString() });
-        return { success: false, status: 'failed', error: e.message, emailLogId: log.id };
-      }
-    }
-
-    const errMsg = 'Cannot retry: SMTP or API credentials are not yet configured on the server.';
+    const errMsg =
+      'Cannot retry: RESEND_API_KEY is not configured on the server. Add RESEND_API_KEY to your server environment variables or Admin Settings.';
     db.updateEmailLog(log.id, { status: 'failed', error: errMsg, sentAt: new Date().toISOString() });
-    return { success: false, status: 'failed', error: errMsg, emailLogId: log.id };
+    return { success: false, status: 'failed', provider: 'none', error: errMsg, emailLogId: log.id };
   }
 
   /**
@@ -323,7 +473,7 @@ export class EmailService {
     const recipient = targetEmail || settings.ownerNotificationEmail || 'muhammedalimdd@gmail.com';
     const subject = 'AI VIDEO MAKER — TEST EMAIL';
     const message =
-      'Congratulations! Your AI Video Maker email notification system is connected. New customer video requests will be delivered to this Gmail inbox.';
+      'Congratulations! Your ZENVORA email notification system is connected. New customer video requests will be delivered to this Gmail inbox.';
 
     const html = `
 <!DOCTYPE html>
@@ -332,7 +482,7 @@ export class EmailService {
 <body style="margin:0; padding:24px; background-color:#0B0F19; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color:#F1F5F9; line-height:1.6;">
   <div style="max-width:600px; margin:0 auto; background-color:#0F172A; border:1px solid #1E293B; border-radius:12px; overflow:hidden; box-shadow:0 10px 25px rgba(0,0,0,0.5);">
     <div style="background:linear-gradient(135deg, #1E1B4B 0%, #0F172A 100%); padding:28px; border-bottom:1px solid #1E293B; text-align:center;">
-      <div style="font-size:11px; text-transform:uppercase; letter-spacing:1.5px; color:#818CF8; font-weight:700;">AI Video Maker</div>
+      <div style="font-size:11px; text-transform:uppercase; letter-spacing:1.5px; color:#818CF8; font-weight:700;">ZENVORA</div>
       <h1 style="margin:8px 0 0; font-size:22px; color:#FFFFFF; font-weight:700;">Gmail Connection Test</h1>
     </div>
     <div style="padding:28px;">
@@ -350,7 +500,7 @@ export class EmailService {
       </div>
     </div>
     <div style="padding:16px 28px; background:#0B0F19; border-top:1px solid #1E293B; font-size:12px; color:#64748B; text-align:center;">
-      AI Video Maker &bull; Automatic Request Notification System
+      ZENVORA &bull; Automatic Request Notification System
     </div>
   </div>
 </body>
@@ -394,14 +544,23 @@ Status: Verified
 
   // 1. Email A: New Request Notification to Owner (muhammedalimdd@gmail.com)
   // Exact Subject: NEW AI VIDEO REQUEST — [CUSTOMER NAME] — [REQUEST ID]
-  public async sendOwnerNewRequestNotification(request: VideoRequest, baseUrl: string): Promise<SendResult> {
-    const configuredOwner = process.env.OWNER_NOTIFICATION_EMAIL || db.getSettings().ownerNotificationEmail || OWNER_GMAIL_ADDRESS;
+  public async sendOwnerNewRequestNotification(
+    request: VideoRequest,
+    baseUrl: string,
+    options?: { forceRetry?: boolean }
+  ): Promise<SendResult> {
+    const configuredOwner = process.env.ADMIN_NOTIFICATION_EMAIL || process.env.OWNER_NOTIFICATION_EMAIL || db.getSettings().ownerNotificationEmail || OWNER_GMAIL_ADDRESS;
     const ownerEmail = configuredOwner.toLowerCase().includes(OWNER_GMAIL_ADDRESS)
       ? configuredOwner
       : OWNER_GMAIL_ADDRESS;
     const adminLink = `${baseUrl}/admin?request=${request.id}`;
     const isTrial = request.requestType === 'free_trial';
     const customerUsername = request.customerUsername || request.userId || request.customerName;
+    const budgetLabel = isTrial
+      ? 'Free Trial (₹0 — One-Time Free Trial)'
+      : request.quote?.formattedAmount
+      ? `Paid Request (${request.quote.formattedAmount})`
+      : `Paid Request (${request.pricingMessage || 'Custom Quote Based on Video'})`;
 
     const uploadedPhotoLinks = request.characters
       .filter((c) => !!c.referencePhotoUrl)
@@ -409,7 +568,7 @@ Status: Verified
         const fullUrl = c.referencePhotoUrl!.startsWith('http')
           ? c.referencePhotoUrl!
           : `${baseUrl}${c.referencePhotoUrl!.startsWith('/') ? '' : '/'}${c.referencePhotoUrl!}`;
-        return { characterName: c.name, url: fullUrl };
+        return { characterName: c.name, fileName: c.referencePhotoName || 'Reference Photo', url: fullUrl };
       });
 
     const charactersHtml =
@@ -441,7 +600,7 @@ Status: Verified
             ${
               fullPhotoUrl
                 ? `<div style="margin-top:10px; padding:10px; background:#0B0F19; border-radius:6px; border:1px solid #1E293B;">
-                     <span style="color:#94A3B8; font-size:12px; font-weight:600; display:block; margin-bottom:4px;">Uploaded Reference Photo Link:</span>
+                     <span style="color:#94A3B8; font-size:12px; font-weight:600; display:block; margin-bottom:4px;">Uploaded File Reference (${escapeHtml(c.referencePhotoName || 'Photo')}):</span>
                      <a href="${fullPhotoUrl}" target="_blank" style="color:#38BDF8; font-size:13px; font-weight:700; text-decoration:underline; word-break:break-all;">${escapeHtml(fullPhotoUrl)}</a>
                    </div>`
                 : ''
@@ -451,6 +610,19 @@ Status: Verified
             })
             .join('')
         : '<p style="color:#94A3B8;">No character specifications provided.</p>';
+
+    const uploadedFilesHtml =
+      uploadedPhotoLinks.length > 0
+        ? uploadedPhotoLinks
+            .map(
+              (f) => `
+          <div style="background:#0B0F19; border:1px solid #1E293B; border-radius:6px; padding:10px 14px; margin-bottom:8px; font-size:13px;">
+            <strong style="color:#E2E8F0;">${escapeHtml(f.characterName)} (${escapeHtml(f.fileName)}):</strong><br/>
+            <a href="${f.url}" target="_blank" style="color:#38BDF8; text-decoration:underline; word-break:break-all;">${escapeHtml(f.url)}</a>
+          </div>`
+            )
+            .join('')
+        : '<p style="color:#94A3B8; font-size:13px;">No external reference files uploaded.</p>';
 
     const scenesHtml =
       request.scenes.length > 0
@@ -500,27 +672,20 @@ Status: Verified
     
     <!-- HEADER -->
     <div style="background:linear-gradient(135deg, #1E1B4B 0%, #0F172A 100%); padding:28px; border-bottom:1px solid #1E293B;">
-      <div style="font-size:11px; text-transform:uppercase; letter-spacing:1.5px; color:#818CF8; font-weight:700;">AI Video Maker &bull; Automatic Request Dispatch</div>
+      <div style="font-size:11px; text-transform:uppercase; letter-spacing:1.5px; color:#818CF8; font-weight:700;">ZENVORA &bull; Resend Automatic Notification</div>
       <h1 style="margin:8px 0 0; font-size:24px; color:#FFFFFF; font-weight:800;">${escapeHtml(subject)}</h1>
       <p style="margin:6px 0 0; color:#94A3B8; font-size:14px;">
-        Request ID: <span style="color:#38BDF8; font-family:monospace; font-weight:700;">${request.id}</span>
+        Request ID: <span style="color:#38BDF8; font-family:monospace; font-weight:700;">${request.id}</span> &bull; Submitted: <span style="color:#E2E8F0;">${new Date(request.createdAt).toUTCString()}</span>
       </p>
     </div>
 
     <div style="padding:28px;">
 
-      <!-- REQUEST TYPE & CURRENT STATUS -->
+      <!-- REQUEST TYPE & BUDGET -->
       <div style="margin-bottom:24px; padding:18px; background:#131B2E; border-left:5px solid ${isTrial ? '#10B981' : '#F59E0B'}; border-radius:6px;">
         <div style="font-size:15px; font-weight:800; color:${isTrial ? '#34D399' : '#F59E0B'}; letter-spacing:0.5px;">
-          REQUEST TYPE: ${isTrial ? 'FREE TRIAL' : 'PAID REQUEST'}
+          BUDGET &amp; REQUEST TYPE: ${escapeHtml(budgetLabel)}
         </div>
-        <p style="margin:6px 0 0; font-size:14px; color:#FFFFFF;">
-          ${
-            isTrial
-              ? '✓ Free Trial Request (1-Time Free Trial per registered account).'
-              : '⚡ Paid Request — "The payment will be based on the video."'
-          }
-        </p>
         <p style="margin:6px 0 0; font-size:13px; color:#94A3B8;">
           <strong>Current Request Status:</strong> <span style="color:#60A5FA; font-weight:700;">${escapeHtml(request.status)}</span>
         </p>
@@ -528,10 +693,10 @@ Status: Verified
 
       <!-- CUSTOMER INFORMATION -->
       <div style="margin-bottom:24px;">
-        <h3 style="margin:0 0 10px; font-size:13px; text-transform:uppercase; letter-spacing:1px; color:#818CF8; font-weight:700;">Customer Information</h3>
+        <h3 style="margin:0 0 10px; font-size:13px; text-transform:uppercase; letter-spacing:1px; color:#818CF8; font-weight:700;">Customer &amp; Submission Details</h3>
         <table style="width:100%; border-collapse:collapse; font-size:14px; background:#0B0F19; border:1px solid #1E293B; border-radius:8px; padding:12px;">
           <tr>
-            <td style="padding:8px 12px; color:#94A3B8; width:200px;">Customer Name:</td>
+            <td style="padding:8px 12px; color:#94A3B8; width:210px;">Customer Name:</td>
             <td style="padding:8px 12px; color:#FFFFFF; font-weight:700;">${escapeHtml(request.customerName)}</td>
           </tr>
           <tr>
@@ -539,16 +704,24 @@ Status: Verified
             <td style="padding:8px 12px; color:#A78BFA; font-family:monospace; font-weight:700;">@${escapeHtml(customerUsername)}</td>
           </tr>
           <tr>
-            <td style="padding:8px 12px; color:#94A3B8;">Customer Email Address (Delivery):</td>
-            <td style="padding:8px 12px; color:#38BDF8; font-weight:700;">${escapeHtml(request.customerEmail)}</td>
+            <td style="padding:8px 12px; color:#94A3B8;">Customer Email (Delivery):</td>
+            <td style="padding:8px 12px; color:#38BDF8; font-weight:700;"><a href="mailto:${escapeHtml(request.customerEmail)}" style="color:#38BDF8;">${escapeHtml(request.customerEmail)}</a></td>
           </tr>
           <tr>
             <td style="padding:8px 12px; color:#94A3B8;">Request ID:</td>
             <td style="padding:8px 12px; color:#38BDF8; font-family:monospace; font-weight:700;">${escapeHtml(request.id)}</td>
           </tr>
           <tr>
-            <td style="padding:8px 12px; color:#94A3B8;">Request Submission Date & Time:</td>
+            <td style="padding:8px 12px; color:#94A3B8;">Submission Date:</td>
             <td style="padding:8px 12px; color:#FFFFFF;">${new Date(request.createdAt).toLocaleString()} (${new Date(request.createdAt).toUTCString()})</td>
+          </tr>
+          <tr>
+            <td style="padding:8px 12px; color:#94A3B8;">Budget / Plan:</td>
+            <td style="padding:8px 12px; color:#34D399; font-weight:700;">${escapeHtml(budgetLabel)}</td>
+          </tr>
+          <tr>
+            <td style="padding:8px 12px; color:#94A3B8;">Orientation &amp; Aspect Ratio:</td>
+            <td style="padding:8px 12px; color:#FFFFFF; font-weight:700;">${escapeHtml(request.format.toUpperCase())} (${escapeHtml(request.aspectRatio)}) &mdash; ${escapeHtml(request.outputResolution || request.resolution)}</td>
           </tr>
           ${request.customerPhone ? `<tr><td style="padding:8px 12px; color:#94A3B8;">Phone / WhatsApp:</td><td style="padding:8px 12px; color:#FFFFFF;">${escapeHtml(request.customerPhone)}</td></tr>` : ''}
         </table>
@@ -556,18 +729,18 @@ Status: Verified
 
       <!-- VIDEO SPECIFICATIONS -->
       <div style="margin-bottom:24px;">
-        <h3 style="margin:0 0 10px; font-size:13px; text-transform:uppercase; letter-spacing:1px; color:#94A3B8; font-weight:700;">Video Specifications & Preferences</h3>
+        <h3 style="margin:0 0 10px; font-size:13px; text-transform:uppercase; letter-spacing:1px; color:#94A3B8; font-weight:700;">Video Specifications &amp; Preferences</h3>
         <table style="width:100%; border-collapse:collapse; font-size:14px; background:#0B0F19; border:1px solid #1E293B; border-radius:8px;">
           <tr>
-            <td style="padding:8px 12px; color:#94A3B8; width:200px;">Video Title:</td>
+            <td style="padding:8px 12px; color:#94A3B8; width:210px;">Video Idea / Title:</td>
             <td style="padding:8px 12px; color:#FFFFFF; font-weight:700;">${escapeHtml(request.title)}</td>
           </tr>
           <tr>
-            <td style="padding:8px 12px; color:#94A3B8;">Video Category & Style:</td>
+            <td style="padding:8px 12px; color:#94A3B8;">Video Category &amp; Style:</td>
             <td style="padding:8px 12px; color:#FFFFFF; font-weight:600;">${escapeHtml(request.videoType || 'Custom AI Video')} &bull; ${escapeHtml(request.purpose || 'General')} &bull; ${escapeHtml(request.style)}${request.customStyle ? ` (${escapeHtml(request.customStyle)})` : ''}</td>
           </tr>
           <tr>
-            <td style="padding:8px 12px; color:#94A3B8;">Portrait or Landscape Format:</td>
+            <td style="padding:8px 12px; color:#94A3B8;">Orientation / Format:</td>
             <td style="padding:8px 12px; color:#FFFFFF; font-weight:600;">${request.format.toUpperCase()} (${escapeHtml(request.aspectRatio)}) &mdash; ${escapeHtml(request.outputResolution || request.resolution)}</td>
           </tr>
           <tr>
@@ -579,7 +752,7 @@ Status: Verified
             <td style="padding:8px 12px; color:#38BDF8; font-weight:700;">${escapeHtml(request.language || 'English')}</td>
           </tr>
           <tr>
-            <td style="padding:8px 12px; color:#94A3B8;">Dialogue & Voice-Over Preferences:</td>
+            <td style="padding:8px 12px; color:#94A3B8;">Dialogue &amp; Voice-Over Preferences:</td>
             <td style="padding:8px 12px; color:#FFFFFF;">Voice-Over: ${escapeHtml(request.voiceOverPref || 'None')} &bull; Dialogue: ${escapeHtml(request.dialoguePref || 'Standard')} &bull; Subtitles: ${request.subtitles ? 'Yes' : 'No'}</td>
           </tr>
           <tr>
@@ -591,25 +764,31 @@ Status: Verified
 
       <!-- VIDEO IDEA & DESCRIPTION -->
       <div style="margin-bottom:24px;">
-        <h3 style="margin:0 0 10px; font-size:13px; text-transform:uppercase; letter-spacing:1px; color:#94A3B8; font-weight:700;">Video Idea & Description</h3>
+        <h3 style="margin:0 0 10px; font-size:13px; text-transform:uppercase; letter-spacing:1px; color:#94A3B8; font-weight:700;">Video Idea &amp; Description</h3>
         <div style="background:#090D16; padding:16px; border-radius:8px; border:1px solid #1E293B; font-size:14px; color:#E2E8F0; white-space:pre-wrap; line-height:1.7;">
-          ${escapeHtml(request.summary || request.storyDescription || 'No summary entered.')}
+          ${escapeHtml(request.summary || request.storyDescription || request.title)}
         </div>
       </div>
 
       <!-- STORY & SCENE DESCRIPTIONS -->
       <div style="margin-bottom:24px;">
-        <h3 style="margin:0 0 10px; font-size:13px; text-transform:uppercase; letter-spacing:1px; color:#94A3B8; font-weight:700;">Story & Scene Descriptions (${request.scenes.length} Scenes)</h3>
+        <h3 style="margin:0 0 10px; font-size:13px; text-transform:uppercase; letter-spacing:1px; color:#94A3B8; font-weight:700;">Detailed Story &amp; Scene Descriptions (${request.scenes.length} Scenes)</h3>
         <div style="background:#090D16; padding:16px; border-radius:8px; border:1px solid #1E293B; font-size:14px; color:#E2E8F0; white-space:pre-wrap; line-height:1.7; margin-bottom:12px;">
           ${escapeHtml(request.storyDescription || request.summary || 'No story narrative entered.')}
         </div>
         ${scenesHtml}
       </div>
 
-      <!-- CHARACTERS & UPLOADED REFERENCE PHOTO LINKS -->
+      <!-- CHARACTERS -->
       <div style="margin-bottom:24px;">
-        <h3 style="margin:0 0 10px; font-size:13px; text-transform:uppercase; letter-spacing:1px; color:#94A3B8; font-weight:700;">Character Names, Descriptions & Uploaded Reference Photo Links (${request.characters.length})</h3>
+        <h3 style="margin:0 0 10px; font-size:13px; text-transform:uppercase; letter-spacing:1px; color:#94A3B8; font-weight:700;">Characters (${request.characters.length})</h3>
         ${charactersHtml}
+      </div>
+
+      <!-- UPLOADED FILE REFERENCES -->
+      <div style="margin-bottom:24px;">
+        <h3 style="margin:0 0 10px; font-size:13px; text-transform:uppercase; letter-spacing:1px; color:#94A3B8; font-weight:700;">Uploaded File References (${uploadedPhotoLinks.length})</h3>
+        ${uploadedFilesHtml}
       </div>
 
       <!-- CHARACTER DIALOGUES -->
@@ -637,7 +816,7 @@ Status: Verified
 
     <!-- FOOTER -->
     <div style="padding:16px 28px; background:#0B0F19; border-top:1px solid #1E293B; font-size:12px; color:#64748B; text-align:center;">
-      AI Video Maker &bull; Automatic Request Delivery to ${escapeHtml(ownerEmail)} &bull; ${request.id}
+      ZENVORA &bull; Automatic Resend Delivery to ${escapeHtml(ownerEmail)} &bull; ${request.id}
     </div>
   </div>
 </body>
@@ -646,19 +825,21 @@ Status: Verified
 
     const text = `
 ${subject}
+============================================================
 
 1. Customer Name: ${request.customerName}
 2. Customer Username: @${customerUsername}
 3. Customer Email Address: ${request.customerEmail}
 4. Request ID: ${request.id}
-5. Request Submission Date and Time: ${request.createdAt}
-6. Video Title: ${request.title}
-7. Video Idea and Description: ${request.summary || request.storyDescription}
-8. Video Category and Style: ${request.videoType || 'Custom AI Video'} / ${request.purpose || 'General'} / ${request.style}${request.customStyle ? ` (${request.customStyle})` : ''}
-9. Portrait or Landscape Format: ${request.format.toUpperCase()} (${request.aspectRatio}) — ${request.outputResolution || request.resolution}
-10. Requested Duration: ${request.duration}${request.customDuration ? ` (${request.customDuration})` : ''}
-11. Video Language: ${request.language || 'English'}
-12. Character Names and Descriptions:
+5. Submission Date: ${request.createdAt}
+6. Video Idea / Title: ${request.title}
+7. Description: ${request.storyDescription || request.summary}
+8. Budget: ${budgetLabel}
+9. Orientation: ${request.format.toUpperCase()} (${request.aspectRatio}) — ${request.outputResolution || request.resolution}
+10. Video Category and Style: ${request.videoType || 'Custom AI Video'} / ${request.purpose || 'General'} / ${request.style}${request.customStyle ? ` (${request.customStyle})` : ''}
+11. Requested Duration: ${request.duration}${request.customDuration ? ` (${request.customDuration})` : ''}
+12. Video Language: ${request.language || 'English'}
+13. Characters:
 ${
   request.characters.length > 0
     ? request.characters
@@ -671,13 +852,13 @@ ${
         .join('\n')
     : 'None specified'
 }
-13. Uploaded Reference Photo Links:
+14. Uploaded File References:
 ${
   uploadedPhotoLinks.length > 0
-    ? uploadedPhotoLinks.map((p) => `- ${p.characterName}: ${p.url}`).join('\n')
-    : 'No reference photos uploaded'
+    ? uploadedPhotoLinks.map((p) => `- ${p.characterName} (${p.fileName}): ${p.url}`).join('\n')
+    : 'No reference files uploaded'
 }
-14. Story and Scene Descriptions:
+15. Story and Scene Descriptions:
 Story: ${request.storyDescription || request.summary || 'N/A'}
 ${
   request.scenes.length > 0
@@ -689,16 +870,15 @@ ${
         .join('\n')
     : ''
 }
-15. Dialogue and Voice-Over Preferences:
+16. Dialogue and Voice-Over Preferences:
 Voice-Over: ${request.voiceOverPref || 'None'} | Dialogue Preference: ${request.dialoguePref || 'Standard'} | Subtitles: ${request.subtitles ? 'Yes' : 'No'}
 ${
   request.dialogueLines.length > 0
     ? request.dialogueLines.map((d) => `- ${d.character}: "${d.text}" (${d.language})`).join('\n')
     : ''
 }
-16. Music Preferences:
+17. Music Preferences:
 Background Music: ${request.backgroundMusic || 'Cinematic Ambient'} | Sound Effects: ${request.soundEffects ? 'Yes' : 'No'}
-17. Free Trial or Paid Request Type: ${isTrial ? 'FREE TRIAL' : 'PAID REQUEST'}
 18. Current Request Status: ${request.status}
 
 Special Instructions:
@@ -714,7 +894,9 @@ ${adminLink}
       to: ownerEmail,
       subject,
       html,
-      text
+      text,
+      replyTo: request.customerEmail,
+      forceRetry: options?.forceRetry
     });
   }
 
@@ -736,7 +918,7 @@ ${adminLink}
 <body style="margin:0; padding:24px; background-color:#0B0F19; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color:#F1F5F9; line-height:1.6;">
   <div style="max-width:600px; margin:0 auto; background-color:#0F172A; border:1px solid #1E293B; border-radius:12px; overflow:hidden; box-shadow:0 10px 25px rgba(0,0,0,0.5);">
     <div style="background:linear-gradient(135deg, #1E1B4B 0%, #0F172A 100%); padding:28px; border-bottom:1px solid #1E293B; text-align:center;">
-      <div style="font-size:11px; text-transform:uppercase; letter-spacing:1.5px; color:#818CF8; font-weight:700;">AI Video Maker</div>
+      <div style="font-size:11px; text-transform:uppercase; letter-spacing:1.5px; color:#818CF8; font-weight:700;">ZENVORA</div>
       <h1 style="margin:8px 0 0; font-size:22px; color:#FFFFFF; font-weight:800;">YOUR AI VIDEO REQUEST HAS BEEN RECEIVED</h1>
       <p style="margin:8px 0 0; color:#94A3B8; font-size:14px;">Unique Request ID: <span style="color:#60A5FA; font-family:monospace; font-weight:700;">${request.id}</span></p>
     </div>
@@ -776,7 +958,7 @@ ${adminLink}
     </div>
 
     <div style="padding:16px 28px; background:#0B0F19; border-top:1px solid #1E293B; font-size:12px; color:#64748B; text-align:center;">
-      AI Video Maker &bull; Studio Dispatch &bull; Request ${request.id}
+      ZENVORA &bull; Studio Dispatch &bull; Request ${request.id}
     </div>
   </div>
 </body>
@@ -802,7 +984,7 @@ Status: ${request.status}
 Track status anytime:
 ${trackingLink}
 
-AI Video Maker
+ZENVORA
     `.trim();
 
     return this.dispatchEmail({
@@ -831,7 +1013,7 @@ AI Video Maker
 <body style="margin:0; padding:24px; background-color:#0B0F19; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color:#F1F5F9; line-height:1.6;">
   <div style="max-width:600px; margin:0 auto; background-color:#0F172A; border:1px solid #1E293B; border-radius:12px; overflow:hidden;">
     <div style="background:linear-gradient(135deg, #1E1B4B 0%, #0F172A 100%); padding:28px; border-bottom:1px solid #1E293B; text-align:center;">
-      <div style="font-size:11px; text-transform:uppercase; letter-spacing:1.5px; color:#A78BFA; font-weight:700;">AI Video Maker</div>
+      <div style="font-size:11px; text-transform:uppercase; letter-spacing:1.5px; color:#A78BFA; font-weight:700;">ZENVORA</div>
       <h1 style="margin:8px 0 0; font-size:22px; color:#FFFFFF; font-weight:700;">Proposed Quote for "${escapeHtml(request.title)}"</h1>
       <p style="margin:8px 0 0; color:#94A3B8; font-size:14px;">Request ID: <span style="color:#60A5FA; font-family:monospace; font-weight:600;">${request.id}</span></p>
     </div>
@@ -864,7 +1046,7 @@ AI Video Maker
     </div>
 
     <div style="padding:16px 28px; background:#0B0F19; border-top:1px solid #1E293B; font-size:12px; color:#64748B; text-align:center;">
-      AI Video Maker &bull; Studio Quote Notice &bull; Request ${request.id}
+      ZENVORA &bull; Studio Quote Notice &bull; Request ${request.id}
     </div>
   </div>
 </body>
@@ -881,7 +1063,7 @@ Scope Breakdown: ${quote.breakdown || 'Comprehensive video production and curati
 Review, accept or decline this quote:
 ${quoteReviewLink}
 
-AI Video Maker
+ZENVORA
     `.trim();
 
     return this.dispatchEmail({
@@ -937,7 +1119,7 @@ Production has officially started. You will receive an email with the video link
 Track progress:
 ${trackingLink}
 
-AI Video Maker
+ZENVORA
     `.trim();
 
     return this.dispatchEmail({
@@ -973,7 +1155,7 @@ AI Video Maker
 <body style="margin:0; padding:24px; background-color:#0B0F19; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color:#F1F5F9; line-height:1.6;">
   <div style="max-width:600px; margin:0 auto; background-color:#0F172A; border:1px solid #1E293B; border-radius:12px; overflow:hidden; box-shadow:0 10px 25px rgba(0,0,0,0.5);">
     <div style="background:linear-gradient(135deg, #065F46 0%, #0F172A 100%); padding:28px; border-bottom:1px solid #1E293B; text-align:center;">
-      <div style="font-size:11px; text-transform:uppercase; letter-spacing:1.5px; color:#6EE7B7; font-weight:700;">AI Video Maker</div>
+      <div style="font-size:11px; text-transform:uppercase; letter-spacing:1.5px; color:#6EE7B7; font-weight:700;">ZENVORA</div>
       <h1 style="margin:8px 0 0; font-size:24px; color:#FFFFFF; font-weight:700;">Your Completed AI Video is Ready!</h1>
       <p style="margin:6px 0 0; color:#A7F3D0; font-size:14px;">Request ID: <span style="font-family:monospace; font-weight:600;">${escapeHtml(request.id)}</span></p>
     </div>
@@ -1012,7 +1194,7 @@ AI Video Maker
     </div>
 
     <div style="padding:16px 28px; background:#0B0F19; border-top:1px solid #1E293B; font-size:12px; color:#64748B; text-align:center;">
-      AI Video Maker &bull; Delivered to ${escapeHtml(request.customerEmail)}
+      ZENVORA &bull; Delivered to ${escapeHtml(request.customerEmail)}
     </div>
   </div>
 </body>
@@ -1030,7 +1212,7 @@ ${options.customMessage ? `Studio Note: ${options.customMessage}\n\n` : ''}Secur
 ${fullDownloadUrl}
 
 ${options.expirationNote ? `Notice: ${options.expirationNote}\n` : ''}
-Thank you for creating with AI Video Maker!
+Thank you for creating with ZENVORA!
     `.trim();
 
     return this.dispatchEmail({
@@ -1044,8 +1226,12 @@ Thank you for creating with AI Video Maker!
   }
 
   // 6. Email F: Budget Request Notification to Owner (muhammedalimdd@gmail.com)
-  public async sendOwnerBudgetRequestNotification(budgetReq: BudgetRequest, baseUrl: string): Promise<SendResult> {
-    const configuredOwner = process.env.OWNER_NOTIFICATION_EMAIL || db.getSettings().ownerNotificationEmail || OWNER_GMAIL_ADDRESS;
+  public async sendOwnerBudgetRequestNotification(
+    budgetReq: BudgetRequest,
+    baseUrl: string,
+    options?: { forceRetry?: boolean }
+  ): Promise<SendResult> {
+    const configuredOwner = process.env.ADMIN_NOTIFICATION_EMAIL || process.env.OWNER_NOTIFICATION_EMAIL || db.getSettings().ownerNotificationEmail || OWNER_GMAIL_ADDRESS;
     const ownerEmail = configuredOwner.toLowerCase().includes(OWNER_GMAIL_ADDRESS)
       ? configuredOwner
       : OWNER_GMAIL_ADDRESS;
@@ -1065,7 +1251,7 @@ Thank you for creating with AI Video Maker!
 <body style="margin:0; padding:24px; background-color:#0B0F19; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color:#F1F5F9; line-height:1.6;">
   <div style="max-width:680px; margin:0 auto; background-color:#0F172A; border:1px solid #1E293B; border-radius:12px; overflow:hidden;">
     <div style="background:linear-gradient(135deg, #1E1B4B 0%, #0F172A 100%); padding:28px; border-bottom:1px solid #1E293B;">
-      <div style="font-size:11px; text-transform:uppercase; letter-spacing:1.5px; color:#818CF8; font-weight:700;">AI Video Maker &bull; Direct Request Notification</div>
+      <div style="font-size:11px; text-transform:uppercase; letter-spacing:1.5px; color:#818CF8; font-weight:700;">ZENVORA &bull; Direct Request Notification</div>
       <h2 style="margin:6px 0 0; font-size:22px; color:#FFFFFF;">${escapeHtml(subject)}</h2>
       <p style="margin:4px 0 0; color:#94A3B8; font-size:14px;">Request ID: <span style="color:#60A5FA; font-family:monospace;">${budgetReq.id}</span> &bull; Budget: <strong style="color:#34D399;">${budgetReq.budgetCategory} (${budgetReq.budgetAmount})</strong></p>
     </div>
@@ -1075,11 +1261,11 @@ Thank you for creating with AI Video Maker!
         <p style="margin:3px 0; font-size:14px;"><strong>Customer Name:</strong> ${escapeHtml(budgetReq.fullName)}</p>
         <p style="margin:3px 0; font-size:14px;"><strong>Customer Email:</strong> <a href="mailto:${escapeHtml(budgetReq.email)}" style="color:#38BDF8;">${escapeHtml(budgetReq.email)}</a></p>
         <p style="margin:3px 0; font-size:14px;"><strong>Request ID:</strong> ${escapeHtml(budgetReq.id)}</p>
-        <p style="margin:3px 0; font-size:14px;"><strong>Submitted At:</strong> ${new Date(budgetReq.createdAt).toUTCString()}</p>
+        <p style="margin:3px 0; font-size:14px;"><strong>Submission Date:</strong> ${new Date(budgetReq.createdAt).toUTCString()}</p>
         <p style="margin:3px 0; font-size:14px;"><strong>Preferred Video Type:</strong> ${escapeHtml(budgetReq.preferredVideoType)}</p>
-        <p style="margin:3px 0; font-size:14px;"><strong>Video Format / Aspect Ratio:</strong> ${escapeHtml(budgetReq.videoFormat.toUpperCase())} (${escapeHtml(budgetReq.aspectRatio)})</p>
+        <p style="margin:3px 0; font-size:14px;"><strong>Orientation / Format:</strong> ${escapeHtml(budgetReq.videoFormat.toUpperCase())} (${escapeHtml(budgetReq.aspectRatio)})</p>
         <p style="margin:3px 0; font-size:14px;"><strong>Requested Duration:</strong> ${escapeHtml(budgetReq.preferredDuration)}</p>
-        <p style="margin:3px 0; font-size:14px;"><strong>Budget Tier:</strong> ${escapeHtml(budgetReq.budgetCategory)} (${escapeHtml(budgetReq.budgetAmount)})</p>
+        <p style="margin:3px 0; font-size:14px;"><strong>Budget:</strong> ${escapeHtml(budgetReq.budgetCategory)} (${escapeHtml(budgetReq.budgetAmount)})</p>
         <p style="margin:3px 0; font-size:14px;"><strong>Current Status:</strong> ${escapeHtml(budgetReq.status)}</p>
       </div>
       <div style="margin-bottom:20px;">
@@ -1089,7 +1275,7 @@ Thank you for creating with AI Video Maker!
       ${
         budgetReq.detailedMessage
           ? `<div style="margin-bottom:20px;">
-        <h4 style="margin:0 0 6px; color:#94A3B8; font-size:13px; text-transform:uppercase;">Detailed Story / Scene Description</h4>
+        <h4 style="margin:0 0 6px; color:#94A3B8; font-size:13px; text-transform:uppercase;">Detailed Story / Description</h4>
         <div style="background:#090D16; padding:14px; border-radius:8px; font-size:14px; color:#F1F5F9; white-space:pre-wrap; border:1px solid #1E293B;">${escapeHtml(budgetReq.detailedMessage)}</div>
       </div>`
           : ''
@@ -1105,7 +1291,7 @@ Thank you for creating with AI Video Maker!
       ${
         fullPhotoUrl
           ? `<div style="margin-bottom:20px; padding:12px; background:#090D16; border:1px solid #1E293B; border-radius:8px;">
-        <h4 style="margin:0 0 6px; color:#94A3B8; font-size:13px; text-transform:uppercase;">Uploaded Reference Photo Link</h4>
+        <h4 style="margin:0 0 6px; color:#94A3B8; font-size:13px; text-transform:uppercase;">Uploaded File References</h4>
         <a href="${fullPhotoUrl}" target="_blank" style="color:#38BDF8; font-size:13px; word-break:break-all;">${escapeHtml(fullPhotoUrl)}</a>
       </div>`
           : ''
@@ -1125,18 +1311,18 @@ Thank you for creating with AI Video Maker!
       `Customer Name: ${budgetReq.fullName}`,
       `Customer Email: ${budgetReq.email}`,
       `Request ID: ${budgetReq.id}`,
-      `Submission Date & Time: ${new Date(budgetReq.createdAt).toUTCString()}`,
+      `Submission Date: ${new Date(budgetReq.createdAt).toUTCString()}`,
       `Preferred Video Type: ${budgetReq.preferredVideoType}`,
-      `Format / Aspect Ratio: ${budgetReq.videoFormat.toUpperCase()} (${budgetReq.aspectRatio})`,
+      `Orientation / Format: ${budgetReq.videoFormat.toUpperCase()} (${budgetReq.aspectRatio})`,
       `Requested Duration: ${budgetReq.preferredDuration}`,
-      `Budget Category: ${budgetReq.budgetCategory} (${budgetReq.budgetAmount})`,
+      `Budget: ${budgetReq.budgetCategory} (${budgetReq.budgetAmount})`,
       `Current Status: ${budgetReq.status}`,
       '',
       'VIDEO IDEA:',
       budgetReq.videoIdea,
-      budgetReq.detailedMessage ? `\nDETAILED MESSAGE:\n${budgetReq.detailedMessage}` : '',
+      budgetReq.detailedMessage ? `\nDESCRIPTION:\n${budgetReq.detailedMessage}` : '',
       budgetReq.additionalInstructions ? `\nADDITIONAL INSTRUCTIONS:\n${budgetReq.additionalInstructions}` : '',
-      fullPhotoUrl ? `\nREFERENCE PHOTO LINK:\n${fullPhotoUrl}` : '',
+      fullPhotoUrl ? `\nUPLOADED FILE REFERENCES:\n${fullPhotoUrl}` : '',
       `\nAdmin Link: ${adminLink}`
     ]
       .filter(Boolean)
@@ -1148,7 +1334,9 @@ Thank you for creating with AI Video Maker!
       to: ownerEmail,
       subject,
       html,
-      text
+      text,
+      replyTo: budgetReq.email,
+      forceRetry: options?.forceRetry
     });
   }
 
@@ -1169,7 +1357,7 @@ Thank you for creating with AI Video Maker!
     <div style="padding:24px;">
       <p style="color:#CBD5E1; font-size:14px; margin-top:0;">Hello <strong>${escapeHtml(budgetReq.fullName)}</strong>,</p>
       <p style="color:#CBD5E1; font-size:14px;">
-        Thank you for sharing your video idea with AI Video Maker. We have received your request and will review it.
+        Thank you for sharing your video idea with ZENVORA. We have received your request and will review it.
       </p>
       ${budgetReq.isFree ? `
       <div style="background:#064E3B; border:1px solid #059669; padding:12px; border-radius:6px; color:#A7F3D0; font-size:13px; margin:16px 0;">
@@ -1187,7 +1375,7 @@ Thank you for creating with AI Video Maker!
       to: budgetReq.email,
       subject,
       html,
-      text: `Hello ${budgetReq.fullName},\n\nWe received your request [${budgetReq.id}].\n\nAI Video Maker`
+      text: `Hello ${budgetReq.fullName},\n\nWe received your request [${budgetReq.id}].\n\nZENVORA`
     });
   }
 
@@ -1205,7 +1393,7 @@ Thank you for creating with AI Video Maker!
       <h3 style="margin:0 0 12px; color:#FFFFFF;">Update Regarding Your Request: ${budgetReq.id}</h3>
       <p style="color:#CBD5E1; font-size:14px;">Hello <strong>${escapeHtml(budgetReq.fullName)}</strong>,</p>
       <div style="background:#131B2E; padding:14px; border-radius:6px; color:#FFFFFF; font-size:14px; margin:14px 0; white-space:pre-wrap;">${escapeHtml(message)}</div>
-      <p style="color:#94A3B8; font-size:12px;">AI Video Maker</p>
+      <p style="color:#94A3B8; font-size:12px;">ZENVORA</p>
     </div>
   </div>
 </body>
@@ -1218,7 +1406,7 @@ Thank you for creating with AI Video Maker!
       to: budgetReq.email,
       subject,
       html,
-      text: `Update regarding your request [${budgetReq.id}]:\n\n${message}\n\nAI Video Maker`
+      text: `Update regarding your request [${budgetReq.id}]:\n\n${message}\n\nZENVORA`
     });
   }
 

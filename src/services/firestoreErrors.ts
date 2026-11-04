@@ -41,7 +41,7 @@ export function handleFirestoreError(
       isAnonymous: currentUser?.isAnonymous,
       tenantId: currentUser?.tenantId,
       providerInfo:
-        currentUser?.providerData?.map((provider) => ({
+        currentUser?.providerData?.map((provider: { providerId?: string | null; email?: string | null }) => ({
           providerId: provider.providerId,
           email: provider.email,
         })) || []
@@ -49,6 +49,6 @@ export function handleFirestoreError(
     operationType,
     path
   };
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  console.error('Storage Error: ', JSON.stringify(errInfo));
   throw new Error(JSON.stringify(errInfo));
 }

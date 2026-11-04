@@ -474,6 +474,30 @@ app.post('/api/requests', async (req, res) => {
 
     const resolvedUsername = customerUsername || user.username || user.displayName || customerName.trim();
 
+    // Prevent duplicate rapid submissions (within 30 seconds for the same customer email + title)
+    const recentDuplicate = db.getAllRequests().find(
+      (r) =>
+        r.customerEmail.toLowerCase() === finalCustomerEmail &&
+        r.title.trim().toLowerCase() === title.trim().toLowerCase() &&
+        Date.now() - new Date(r.createdAt).getTime() < 30000
+    );
+
+    if (recentDuplicate) {
+      return res.status(200).json({
+        success: true,
+        request: recentDuplicate,
+        isFreeTrial: recentDuplicate.requestType === 'free_trial',
+        duplicatePrevented: true,
+        message: 'Your video request has already been submitted and notification was processed.',
+        emailNotification: {
+          ownerNotificationSent: true,
+          ownerNotificationStatus: 'sent',
+          duplicatePrevented: true,
+          recipient: 'muhammedalimdd@gmail.com'
+        }
+      });
+    }
+
     // Atomic creation with Free Trial verification
     const { request: created, isFreeTrial } = db.createRequest({
       userId: user.uid,
@@ -526,7 +550,7 @@ app.post('/api/requests', async (req, res) => {
 
     const baseUrl = getBaseUrl(req);
 
-    // Dispatch emails to owner (muhammedalimdd@gmail.com) and customer delivery email
+    // Send notification email via Resend API ONLY after request is successfully saved
     const [ownerEmailResult, customerEmailResult] = await Promise.all([
       emailService.sendOwnerNewRequestNotification(created, baseUrl).catch((e) => {
         console.error('Owner notification email failed:', e);
@@ -542,10 +566,16 @@ app.post('/api/requests', async (req, res) => {
       success: true,
       request: created,
       isFreeTrial,
+      message: ownerEmailResult.success
+        ? 'Your video request has been submitted and sent to muhammedalimdd@gmail.com!'
+        : 'Your video request has been saved. Admin email notification is queued.',
       emailNotification: {
         ownerNotificationSent: ownerEmailResult.success,
         ownerNotificationStatus: ownerEmailResult.status,
         ownerNotificationError: ownerEmailResult.error,
+        provider: (ownerEmailResult as any).provider || 'resend',
+        duplicatePrevented: !!(ownerEmailResult as any).duplicatePrevented,
+        recipient: 'muhammedalimdd@gmail.com',
         customerConfirmationSent: customerEmailResult.success
       }
     });
@@ -768,9 +798,33 @@ app.post('/api/budget-requests', async (req, res) => {
     if (videoFormat === 'portrait') aspectRatio = '9:16';
     if (videoFormat === 'square') aspectRatio = '1:1';
 
+    // Prevent duplicate rapid budget submissions (within 30 seconds for the same email + idea)
+    const normalizedBudgetEmail = email.trim().toLowerCase();
+    const recentBudgetDuplicate = db.getAllBudgetRequests().find(
+      (b) =>
+        b.email.toLowerCase() === normalizedBudgetEmail &&
+        b.videoIdea.trim().toLowerCase() === videoIdea.trim().toLowerCase() &&
+        Date.now() - new Date(b.createdAt).getTime() < 30000
+    );
+
+    if (recentBudgetDuplicate) {
+      return res.status(200).json({
+        success: true,
+        budgetRequest: recentBudgetDuplicate,
+        duplicatePrevented: true,
+        message: 'Your request has already been submitted and notification was processed.',
+        emailNotification: {
+          ownerNotificationSent: true,
+          ownerNotificationStatus: 'sent',
+          duplicatePrevented: true,
+          recipient: 'muhammedalimdd@gmail.com'
+        }
+      });
+    }
+
     const created = db.createBudgetRequest({
       fullName: fullName.trim(),
-      email: email.trim().toLowerCase(),
+      email: normalizedBudgetEmail,
       videoIdea: videoIdea.trim(),
       detailedMessage: detailedMessage ? detailedMessage.trim() : undefined,
       preferredVideoType: preferredVideoType || 'cinematic',
@@ -787,24 +841,113 @@ app.post('/api/budget-requests', async (req, res) => {
     });
 
     const baseUrl = getBaseUrl(req);
-    const ownerEmailPromise = emailService
-      .sendOwnerBudgetRequestNotification(created, baseUrl)
-      .catch((e) => console.error('Owner budget notification failed:', e));
-    const customerEmailPromise = emailService
-      .sendCustomerBudgetConfirmation(created)
-      .catch((e) => console.error('Customer budget confirmation failed:', e));
-
-    await Promise.allSettled([ownerEmailPromise, customerEmailPromise]);
+    const [ownerEmailResult, customerEmailResult] = await Promise.all([
+      emailService
+        .sendOwnerBudgetRequestNotification(created, baseUrl)
+        .catch((e) => {
+          console.error('Owner budget notification failed:', e);
+          return { success: false, status: 'failed' as const, error: e.message, emailLogId: '' };
+        }),
+      emailService
+        .sendCustomerBudgetConfirmation(created)
+        .catch((e) => {
+          console.error('Customer budget confirmation failed:', e);
+          return { success: false, status: 'failed' as const, error: e.message, emailLogId: '' };
+        })
+    ]);
 
     res.status(201).json({
       success: true,
-      budgetRequest: created
+      budgetRequest: created,
+      message: ownerEmailResult.success
+        ? 'Your request has been submitted and sent to muhammedalimdd@gmail.com!'
+        : 'Your request has been saved. Admin email notification is queued.',
+      emailNotification: {
+        ownerNotificationSent: ownerEmailResult.success,
+        ownerNotificationStatus: ownerEmailResult.status,
+        ownerNotificationError: ownerEmailResult.error,
+        provider: (ownerEmailResult as any).provider || 'resend',
+        duplicatePrevented: !!(ownerEmailResult as any).duplicatePrevented,
+        recipient: 'muhammedalimdd@gmail.com',
+        customerConfirmationSent: customerEmailResult.success
+      }
     });
   } catch (err: any) {
     console.error('Failed to submit budget request:', err);
     res.status(400).json({ error: err.message || 'Failed to submit budget request.' });
   }
 });
+
+// 10b. Dedicated Secure Backend API Endpoint for Request Email Notification via Resend
+const handleSendRequestNotificationEmail = async (req: express.Request, res: express.Response) => {
+  try {
+    const { requestId, forceRetry } = req.body || {};
+    if (!requestId || typeof requestId !== 'string') {
+      return res.status(400).json({
+        success: false,
+        error: 'A valid submitted requestId is required to send the admin notification email.'
+      });
+    }
+
+    const baseUrl = getBaseUrl(req);
+    const videoReq = db.getRequestById(requestId.trim());
+    if (videoReq) {
+      const result = await emailService.sendOwnerNewRequestNotification(videoReq, baseUrl, {
+        forceRetry: Boolean(forceRetry)
+      });
+      return res.status(result.success ? 200 : 202).json({
+        success: result.success,
+        status: result.status,
+        provider: result.provider || 'resend',
+        recipient: 'muhammedalimdd@gmail.com',
+        requestId: videoReq.id,
+        duplicatePrevented: Boolean(result.duplicatePrevented),
+        emailLogId: result.emailLogId,
+        message: result.duplicatePrevented
+          ? `Notification for ${videoReq.id} was already sent to muhammedalimdd@gmail.com (duplicate prevented).`
+          : result.success
+          ? `Notification for ${videoReq.id} sent to muhammedalimdd@gmail.com via Resend.`
+          : result.error,
+        error: result.error
+      });
+    }
+
+    const budgetReq = db.getBudgetRequestById(requestId.trim());
+    if (budgetReq) {
+      const result = await emailService.sendOwnerBudgetRequestNotification(budgetReq, baseUrl, {
+        forceRetry: Boolean(forceRetry)
+      });
+      return res.status(result.success ? 200 : 202).json({
+        success: result.success,
+        status: result.status,
+        provider: result.provider || 'resend',
+        recipient: 'muhammedalimdd@gmail.com',
+        requestId: budgetReq.id,
+        duplicatePrevented: Boolean(result.duplicatePrevented),
+        emailLogId: result.emailLogId,
+        message: result.duplicatePrevented
+          ? `Notification for ${budgetReq.id} was already sent to muhammedalimdd@gmail.com (duplicate prevented).`
+          : result.success
+          ? `Notification for ${budgetReq.id} sent to muhammedalimdd@gmail.com via Resend.`
+          : result.error,
+        error: result.error
+      });
+    }
+
+    return res.status(404).json({
+      success: false,
+      error: 'Cannot send email notification: Request ID not found. Notifications are sent only after a request is submitted.'
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      success: false,
+      error: err.message || 'Failed to dispatch request notification email.'
+    });
+  }
+};
+
+app.post('/api/notifications/send-request-email', handleSendRequestNotificationEmail);
+app.post('/api/send-request-email', handleSendRequestNotificationEmail);
 
 // ================= ADMIN API ROUTES =================
 
@@ -1195,7 +1338,9 @@ app.post('/api/admin/requests/:id/resend-owner-email', requireAdmin, async (req,
       return res.status(404).json({ error: 'Request not found' });
     }
     const baseUrl = getBaseUrl(req);
-    const result = await emailService.sendOwnerNewRequestNotification(request, baseUrl);
+    const result = await emailService.sendOwnerNewRequestNotification(request, baseUrl, {
+      forceRetry: true
+    });
     res.json(result);
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
@@ -1206,13 +1351,36 @@ app.get('/api/admin/devices', requireAdmin, (_req, res) => {
   res.json({ success: true, devices: db.getAllDevices() });
 });
 
+function getSanitizedSettingsForClient() {
+  const raw = db.getSettings();
+  const hasServerResendKey = Boolean(
+    process.env.RESEND_API_KEY || process.env.EMAIL_PROVIDER_API_KEY || raw.apiKey
+  );
+  return {
+    ...raw,
+    ownerNotificationEmail: raw.ownerNotificationEmail || 'muhammedalimdd@gmail.com',
+    emailProvider: raw.emailProvider || 'resend',
+    apiKey: raw.apiKey ? '••••••••' : '',
+    smtpPass: raw.smtpPass ? '••••••••' : '',
+    hasResendApiKey: hasServerResendKey
+  };
+}
+
 app.get('/api/admin/settings', requireAdmin, (_req, res) => {
-  res.json({ success: true, settings: db.getSettings() });
+  res.json({ success: true, settings: getSanitizedSettingsForClient() });
 });
 
 app.post('/api/admin/settings', requireAdmin, (req, res) => {
-  const updated = db.updateSettings(req.body);
-  res.json({ success: true, settings: updated });
+  const body = { ...(req.body || {}) };
+  const current = db.getSettings();
+  if (body.apiKey === '••••••••' || body.apiKey === '') {
+    body.apiKey = body.apiKey === '' ? '' : current.apiKey;
+  }
+  if (body.smtpPass === '••••••••' || body.smtpPass === '') {
+    body.smtpPass = body.smtpPass === '' ? '' : current.smtpPass;
+  }
+  db.updateSettings(body);
+  res.json({ success: true, settings: getSanitizedSettingsForClient() });
 });
 
 // Catch-all for API routes to ALWAYS return JSON and never HTML

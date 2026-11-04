@@ -660,7 +660,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
         success: !!data.success,
         recipient: data.recipient || settingsOwnerEmail || 'muhammedalimdd@gmail.com',
         subject: data.subject || 'AI VIDEO MAKER — TEST EMAIL',
-        message: data.message || (result.ok ? 'Congratulations! Your AI Video Maker email notification system is connected. New customer video requests will be delivered to this Gmail inbox.' : 'Connection attempt failed'),
+        message: data.message || (result.ok ? 'Congratulations! Your ZENVORA email notification system is connected. New customer video requests will be delivered to this Gmail inbox.' : 'Connection attempt failed'),
         error: data.error || result.error
       });
       loadData();
@@ -761,10 +761,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
     return (
       <div className="fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex items-center justify-center p-4">
         <div className="w-full max-w-md rounded-3xl bg-[#090D16] border border-slate-800 p-8 shadow-2xl relative text-center">
-          <div className="w-14 h-14 rounded-2xl bg-indigo-950/80 border border-indigo-700/60 flex items-center justify-center mx-auto mb-4 text-indigo-400">
-            <Lock className="w-7 h-7" />
+          <div className="w-16 h-16 rounded-full bg-black border border-indigo-500/60 flex items-center justify-center mx-auto mb-4 overflow-hidden shadow-lg shadow-purple-500/30">
+            <img
+              src="/assets/aistudio/Neon_Zenvora_Logo_in_Cosmic_Glow__1__84e2a1d9.png"
+              alt="ZENVORA"
+              className="w-full h-full object-cover"
+            />
           </div>
-          <h3 className="text-xl font-bold text-white mb-1">AI Video Maker Studio Admin</h3>
+          <h3 className="text-xl font-bold text-white mb-1">ZENVORA Studio Admin</h3>
           <p className="text-xs text-slate-400 mb-6">
             Enter your studio admin passphrase to manage video briefs, custom quotes, users, and deliveries.
           </p>
@@ -816,12 +820,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
       {/* Top Admin Bar */}
       <header className="h-16 border-b border-slate-800 bg-[#090D16] px-4 sm:px-6 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center text-white font-bold text-xs">
-            AVM
+          <div className="w-9 h-9 rounded-full bg-black border border-purple-500/60 overflow-hidden flex items-center justify-center shrink-0">
+            <img
+              src="/assets/aistudio/Neon_Zenvora_Logo_in_Cosmic_Glow__1__84e2a1d9.png"
+              alt="ZENVORA"
+              className="w-full h-full object-cover"
+            />
           </div>
           <div>
             <h2 className="text-sm font-bold text-white flex items-center gap-2">
-              <span>AI Video Maker Studio Admin</span>
+              <span>ZENVORA Studio Admin</span>
               <span className="px-2 py-0.5 rounded text-[10px] bg-emerald-950 text-emerald-400 border border-emerald-800 font-mono">
                 LIVE
               </span>
@@ -1590,10 +1598,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
                 <div className="p-4 rounded-xl bg-[#0C1220] border border-slate-800/80 space-y-4">
                   {settingsProvider === 'gmail' && (
                     <div className="p-3 bg-indigo-950/40 border border-indigo-800/50 rounded-lg text-xs text-indigo-200 leading-relaxed">
-                      <strong className="text-white block mb-1">How to use Gmail with AI Video Maker:</strong>
+                      <strong className="text-white block mb-1">How to use Gmail with ZENVORA:</strong>
                       1. Go to your <a href="https://myaccount.google.com/security" target="_blank" rel="noreferrer" className="text-cyan-300 underline font-semibold">Google Account Security</a> settings.<br/>
                       2. Ensure <strong>2-Step Verification</strong> is ON.<br/>
-                      3. Click <strong>App Passwords</strong> and generate a new password named <em>"AI Video Maker"</em>.<br/>
+                      3. Click <strong>App Passwords</strong> and generate a new password named <em>"ZENVORA"</em>.<br/>
                       4. Paste the 16-character password into the <strong>Google App Password</strong> field below.
                     </div>
                   )}

@@ -139,7 +139,7 @@ export const Step7CustomerDelivery: React.FC<Step7Props> = ({
               >
                 Privacy Policy
               </button>
-              . I understand that AI Video Maker is a human-curated video creation service where requests are reviewed, produced with AI video creation tools, and delivered to my chosen delivery email address.
+              . I understand that ZENVORA is a human-curated video creation service where requests are reviewed, produced with AI video creation tools, and delivered to my chosen delivery email address.
             </span>
           </label>
         </div>

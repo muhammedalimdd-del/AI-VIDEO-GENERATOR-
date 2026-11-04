@@ -142,6 +142,7 @@ export const BudgetContactForm: React.FC<BudgetContactFormProps> = ({ onBackToHo
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
     setSubmitError(null);
 
     // Validation
@@ -180,14 +181,23 @@ export const BudgetContactForm: React.FC<BudgetContactFormProps> = ({ onBackToHo
       let usedFallback = false;
 
       try {
-        const fetchResult = await safeFetchJson<{ budgetRequest?: any; error?: string }>('/api/budget-requests', {
+        const fetchResult = await safeFetchJson<{
+          budgetRequest?: any;
+          emailNotification?: any;
+          message?: string;
+          error?: string;
+        }>('/api/budget-requests', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
         });
 
         if (fetchResult.ok && fetchResult.data?.budgetRequest) {
-          budgetRequestData = fetchResult.data.budgetRequest;
+          budgetRequestData = {
+            ...fetchResult.data.budgetRequest,
+            emailNotification: fetchResult.data.emailNotification,
+            notificationMessage: fetchResult.data.message
+          };
         } else if (fetchResult.data?.error) {
           throw new Error(fetchResult.data.error);
         } else {
@@ -228,37 +238,11 @@ export const BudgetContactForm: React.FC<BudgetContactFormProps> = ({ onBackToHo
         }
       }
 
-      // Persist to Firebase Firestore database
+      // Sync to local storage cache
       try {
         await saveBudgetRequestToFirestore(budgetRequestData);
-      } catch (fsErr) {
-        console.warn('Notice: Background Firestore budget request save:', fsErr);
-      }
-
-      // Non-blocking browser relay to muhammedalimdd@gmail.com
-      try {
-        fetch('https://formsubmit.co/ajax/muhammedalimdd@gmail.com', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-          body: JSON.stringify({
-            _subject: `NEW AI VIDEO REQUEST — ${payload.fullName.toUpperCase()} — ${budgetRequestData.id}`,
-            _template: 'table',
-            _captcha: 'false',
-            Customer_Name: payload.fullName,
-            Customer_Email: payload.email,
-            Request_ID: budgetRequestData.id,
-            Submitted_At: budgetRequestData.createdAt || new Date().toISOString(),
-            Video_Idea: payload.videoIdea,
-            Detailed_Message: payload.detailedMessage || 'N/A',
-            Preferred_Video_Type: payload.preferredVideoType,
-            Format_And_Aspect_Ratio: `${payload.videoFormat.toUpperCase()} (${budgetRequestData.aspectRatio || '16:9'})`,
-            Requested_Duration: payload.preferredDuration,
-            Budget_Category: `${budgetRequestData.budgetCategory} (${budgetRequestData.budgetAmount})`,
-            Additional_Instructions: payload.additionalInstructions || 'N/A'
-          })
-        }).catch(() => {});
-      } catch {
-        // ignore
+      } catch (storageErr) {
+        console.warn('Notice: Background local budget request sync:', storageErr);
       }
 
       setSubmittedData(budgetRequestData);
@@ -315,11 +299,23 @@ export const BudgetContactForm: React.FC<BudgetContactFormProps> = ({ onBackToHo
             Your Request Has Been Sent Successfully!
           </h2>
 
-          <p className="text-sm sm:text-base text-slate-300 max-w-xl mx-auto leading-relaxed mb-8">
-            Thank you for sharing your video idea. Your request has been dispatched to{' '}
+          <p className="text-sm sm:text-base text-slate-300 max-w-xl mx-auto leading-relaxed mb-4">
+            Thank you for sharing your video idea. Your request has been dispatched via Resend to{' '}
             <strong className="text-indigo-300 font-mono">muhammedalimdd@gmail.com</strong> and we will contact you at{' '}
             <strong className="text-white">{submittedData.email}</strong>.
           </p>
+
+          {submittedData.emailNotification && (
+            <div className="max-w-lg mx-auto mb-6 px-4 py-2.5 rounded-xl bg-slate-900/80 border border-slate-800 text-xs text-slate-300 flex items-center justify-center gap-2">
+              <Mail className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span>
+                {submittedData.emailNotification.sent
+                  ? 'Automatic email notification delivered to muhammedalimdd@gmail.com via Resend.'
+                  : submittedData.notificationMessage ||
+                    'Request saved and queued for admin notification to muhammedalimdd@gmail.com.'}
+              </span>
+            </div>
+          )}
 
           {/* Request ID & Budget Badges */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-lg mx-auto mb-8">

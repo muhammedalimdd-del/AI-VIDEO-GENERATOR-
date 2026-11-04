@@ -48,11 +48,8 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({ onTimeout }) => {
 
         <div className="space-y-2">
           <div className="flex items-center justify-center gap-2">
-            <span className="font-black text-2xl tracking-tight text-white">
-              AI Video
-            </span>
-            <span className="font-black text-2xl tracking-tight bg-gradient-to-r from-purple-400 via-indigo-300 to-cyan-300 bg-clip-text text-transparent">
-              Maker
+            <span className="font-black text-2xl tracking-wider bg-gradient-to-r from-white via-purple-300 to-cyan-300 bg-clip-text text-transparent">
+              ZENVORA
             </span>
           </div>
 
@@ -70,8 +67,8 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({ onTimeout }) => {
           />
         </div>
 
-        <p className="text-[11px] text-slate-500 font-mono tracking-wider">
-          Your Idea · Your Characters · Your AI Video
+        <p className="text-[11px] text-slate-500 font-mono tracking-wider uppercase">
+          AI &bull; Creativity &bull; Innovation &mdash; Imagine Beyond Reality
         </p>
       </div>
     </div>

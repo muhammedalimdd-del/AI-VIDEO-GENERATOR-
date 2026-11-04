@@ -255,6 +255,8 @@ export const RequestBuilder: React.FC<RequestBuilderProps> = ({
 
   // Submit to server with trial vs paid plan
   const handleSubmit = async (planType: 'free_trial' | 'paid') => {
+    if (isSubmitting) return;
+
     for (let s = 1; s <= 7; s++) {
       if (!validateStep(s)) {
         setCurrentStep(s);
@@ -293,7 +295,12 @@ export const RequestBuilder: React.FC<RequestBuilderProps> = ({
       let usedStaticFallback = false;
 
       try {
-        const fetchResult = await safeFetchJson<{ request?: any; error?: string }>('/api/requests', {
+        const fetchResult = await safeFetchJson<{
+          request?: any;
+          emailNotification?: any;
+          message?: string;
+          error?: string;
+        }>('/api/requests', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(submissionPayload)
@@ -354,49 +361,21 @@ export const RequestBuilder: React.FC<RequestBuilderProps> = ({
         result = { request: fallbackRequest };
       }
 
-      // Persist to Firebase Firestore database
+      // Sync to local storage cache
       try {
         await saveVideoRequestToFirestore(result.request);
-      } catch (fsErr) {
-        console.warn('Notice: Background Firestore video request save:', fsErr);
+      } catch (storageErr) {
+        console.warn('Notice: Background local request sync:', storageErr);
       }
 
-      // Non-blocking browser relay to muhammedalimdd@gmail.com with complete 18-field request summary
-      try {
-        const reqObj = result.request;
-        fetch('https://formsubmit.co/ajax/muhammedalimdd@gmail.com', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-          body: JSON.stringify({
-            _subject: `NEW AI VIDEO REQUEST — ${formData.customerName.trim().toUpperCase()} — ${reqObj.id}`,
-            _template: 'table',
-            _captcha: 'false',
-            Customer_Name: formData.customerName.trim(),
-            Customer_Username: customerUsername,
-            Customer_Email_Address: deliveryEmail,
-            Request_ID: reqObj.id,
-            Submission_Date_Time: reqObj.createdAt || new Date().toISOString(),
-            Video_Title: formData.title,
-            Video_Idea_Description: formData.storyDescription,
-            Video_Category_And_Style: `${formData.videoType} / ${formData.style}`,
-            Format_And_Aspect_Ratio: `${formData.format?.toUpperCase() || 'LANDSCAPE'} (${formData.aspectRatio})`,
-            Requested_Duration: formData.duration === 'custom' ? formData.customDuration : formData.duration,
-            Video_Language: formData.language,
-            Characters: (formData.characters || []).map((c: any) => `${c.name} (${c.role || 'Character'}): ${c.appearance || ''}`).join(' | ') || 'None specified',
-            Uploaded_Reference_Photo_Links: (formData.characters || []).filter((c: any) => c.referencePhotoUrl).map((c: any) => `${c.name}: ${c.referencePhotoUrl}`).join(' | ') || 'None uploaded',
-            Story_And_Scenes: (formData.scenes || []).map((s: any) => `Scene ${s.sceneNumber} (${s.location || ''}): ${s.actions || ''}`).join(' | ') || formData.storyDescription,
-            Dialogue_And_Voiceover: `${formData.voiceOverPref || 'Standard'} (${formData.dialoguePref || 'Natural speech'})`,
-            Music_Preferences: `${formData.backgroundMusic || 'Cinematic'} (SFX: ${formData.soundEffects ? 'Yes' : 'No'})`,
-            Request_Type: planType === 'free_trial' ? 'One-Time Free Trial (₹0)' : 'Paid Video Request',
-            Current_Status: reqObj.status || 'Submitted'
-          })
-        }).catch(() => {});
-      } catch {
-        // ignore
-      }
+      const finalRequest = {
+        ...result.request,
+        emailNotification: result.emailNotification,
+        notificationMessage: result.message
+      };
 
       localStorage.removeItem(STORAGE_KEY);
-      onSuccess(result.request);
+      onSuccess(finalRequest);
     } catch (e: any) {
       setSubmitError(e.message || 'An error occurred while submitting your video request. Please try again.');
     } finally {
