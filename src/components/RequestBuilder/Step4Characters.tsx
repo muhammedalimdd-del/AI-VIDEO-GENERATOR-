@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { RequestFormData, CharacterItem } from '../../types/client.ts';
 import { Users, Plus, Trash2, Upload, CheckCircle2, AlertCircle, Image as ImageIcon, Sparkles, ShieldAlert, X } from 'lucide-react';
+import { safeResponseJson } from '../../services/apiClient.ts';
 
 interface Step4Props {
   data: RequestFormData;
@@ -70,10 +71,9 @@ export const Step4Characters: React.FC<Step4Props> = ({ data, updateData }) => {
           body: formData
         });
 
-        const contentType = res.headers.get('content-type') || '';
-        if (res.ok && contentType.includes('application/json')) {
-          const json = await res.json();
-          if (json.fileUrl) photoUrl = json.fileUrl;
+        const parsed = await safeResponseJson<{ fileUrl?: string }>(res);
+        if (parsed.ok && parsed.data?.fileUrl) {
+          photoUrl = parsed.data.fileUrl;
         }
       } catch (netErr) {
         // Fallback for static hosting (GitHub Pages)

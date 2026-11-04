@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { X, Shield, Lock, FileText, Trash2, Mail, CheckCircle2, AlertCircle } from 'lucide-react';
+import { safeFetchJson } from '../../services/apiClient.ts';
 
 interface ModalProps {
   isOpen: boolean;
@@ -118,13 +119,12 @@ export const DataDeletionModal: React.FC<ModalProps> = ({ isOpen, onClose }) => 
     setMessage(null);
 
     try {
-      const res = await fetch('/api/privacy/delete-request', {
+      const result = await safeFetchJson<{ message?: string; error?: string }>('/api/privacy/delete-request', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: email.trim(), requestId: requestId.trim() })
       });
-      const data = await res.json();
-      setMessage(data.message || 'Deletion request processed.');
+      setMessage(result.data?.message || result.data?.error || result.error || 'Deletion request processed.');
     } catch (err: any) {
       setMessage('Error processing request.');
     } finally {

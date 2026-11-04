@@ -1050,6 +1050,44 @@ Thank you for creating with AI Video Maker!
       text: `Update regarding your request [${budgetReq.id}]:\n\n${message}\n\nAI Video Maker`
     });
   }
+
+  public async sendCustomerReplyNotification(
+    request: VideoRequest,
+    message: string,
+    baseUrl: string
+  ): Promise<SendResult> {
+    const ownerEmail = process.env.OWNER_NOTIFICATION_EMAIL || db.getSettings().ownerNotificationEmail || 'muhammedalimdd@gmail.com';
+    const subject = `CUSTOMER REPLY — ${request.customerName || request.customerEmail} — [${request.id}]`;
+    const adminLink = `${baseUrl}/admin?request=${request.id}`;
+
+    const html = `
+<!DOCTYPE html>
+<html>
+<body style="font-family: Arial, sans-serif; background-color: #050811; color: #FFFFFF; padding: 20px;">
+  <div style="max-width: 600px; margin: 0 auto; background: #0B0F19; border: 1px solid #1E293B; border-radius: 12px; padding: 24px;">
+    <h2 style="color: #A855F7; margin-top: 0;">New Customer Clarification Reply</h2>
+    <p style="color: #94A3B8;">Request: <strong>${escapeHtml(request.id)}</strong> &mdash; ${escapeHtml(request.title || 'Video Project')}</p>
+    <p style="color: #94A3B8;">Customer: <strong>${escapeHtml(request.customerName || 'Customer')}</strong> (${escapeHtml(request.customerEmail)})</p>
+    <div style="background: #131B2E; border-left: 4px solid #A855F7; padding: 14px; margin: 16px 0; border-radius: 6px;">
+      <p style="margin: 0; color: #E2E8F0; font-size: 14px; line-height: 1.6;">${escapeHtml(message)}</p>
+    </div>
+    <div style="margin-top: 24px; text-align: center;">
+      <a href="${adminLink}" style="display: inline-block; background: #6366F1; color: #FFFFFF; font-weight: bold; text-decoration: none; padding: 12px 24px; border-radius: 8px;">Open Request in Admin Dashboard</a>
+    </div>
+  </div>
+</body>
+</html>
+    `;
+
+    return this.dispatchEmail({
+      requestId: request.id,
+      type: 'clarification',
+      to: ownerEmail,
+      subject,
+      html,
+      text: `Customer ${request.customerName} (${request.customerEmail}) replied to request [${request.id}]:\n\n"${message}"\n\nView details: ${adminLink}`
+    });
+  }
 }
 
 function escapeHtml(str: string = ''): string {

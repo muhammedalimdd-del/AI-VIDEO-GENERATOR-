@@ -251,6 +251,29 @@ app.get('/api/auth/me', (req, res) => {
   });
 });
 
+// Google Account Auth Sync Fallback
+app.post('/api/auth/google-sync', (req, res) => {
+  try {
+    const { uid, email, displayName, photoURL } = req.body;
+    if (!email) {
+      return res.status(400).json({ error: 'Valid email is required.' });
+    }
+    const user = db.syncUser({
+      uid: uid || `g-user-${crypto.randomBytes(6).toString('hex')}`,
+      email,
+      displayName,
+      photoURL
+    });
+
+    res.json({
+      success: true,
+      user
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to sync user profile.' });
+  }
+});
+
 app.get('/api/user/trial-eligibility', (req, res) => {
   const email = (req.query.email as string) || (req.headers['x-user-email'] as string);
   const uid = (req.query.uid as string) || (req.headers['x-user-uid'] as string);
@@ -469,7 +492,39 @@ app.get('/api/user/requests', (req, res) => {
   });
 });
 
-// 8. Public Track Video Request by ID and Token
+// 8. Track Video Request (POST Endpoint with verification)
+app.post('/api/requests/track', (req, res) => {
+  try {
+    const { requestId, emailOrToken } = req.body;
+    if (!requestId || !requestId.trim()) {
+      return res.status(400).json({ error: 'Request ID is required.' });
+    }
+
+    const reqId = requestId.trim();
+    const key = (emailOrToken || '').trim().toLowerCase();
+
+    const request = db.getRequestById(reqId);
+    if (!request) {
+      return res.status(404).json({ error: 'Request not found with this ID.' });
+    }
+
+    if (key) {
+      const isEmailMatch = request.customerEmail.toLowerCase() === key;
+      const isTokenMatch = request.accessToken.toLowerCase() === key;
+      const isUserEmailMatch = request.userEmail && request.userEmail.toLowerCase() === key;
+
+      if (!isEmailMatch && !isTokenMatch && !isUserEmailMatch) {
+        return res.status(403).json({ error: 'Verification failed. Email or Access Token does not match.' });
+      }
+    }
+
+    res.json({ success: true, request });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Error tracking request.' });
+  }
+});
+
+// Public Track Video Request by ID and Token (GET)
 app.get('/api/requests/:id', (req, res) => {
   const id = req.params.id;
   const token = req.query.token as string;
@@ -531,6 +586,55 @@ app.post('/api/requests/:id/quote-action', (req, res) => {
     });
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'Failed to record quote decision.' });
+  }
+});
+
+// Customer Clarification Message
+app.post('/api/requests/:id/customer-message', async (req, res) => {
+  try {
+    const id = req.params.id;
+    const { message, token, email } = req.body;
+
+    if (!message || !message.trim()) {
+      return res.status(400).json({ error: 'Message cannot be empty.' });
+    }
+
+    const request = db.getRequestById(id);
+    if (!request) {
+      return res.status(404).json({ error: 'Request not found.' });
+    }
+
+    if (token && request.accessToken.toLowerCase() !== token.toLowerCase()) {
+      return res.status(403).json({ error: 'Unauthorized: Invalid access token.' });
+    }
+
+    const updated = db.addCustomerClarification(id, message.trim());
+    const baseUrl = getBaseUrl(req);
+    emailService.sendCustomerReplyNotification(updated || request, message.trim(), baseUrl).catch(console.error);
+
+    res.json({ success: true, request: updated || request });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to submit customer message.' });
+  }
+});
+
+// GDPR / Data Erasure Request
+app.post('/api/privacy/delete-request', (req, res) => {
+  try {
+    const { email, requestId } = req.body;
+    if (!email && !requestId) {
+      return res.status(400).json({ error: 'Email or Request ID is required for data deletion.' });
+    }
+
+    const deleted = db.deleteVideoRequest(requestId, email);
+    res.json({
+      success: true,
+      message: deleted
+        ? 'Your request data and attached creative references have been permanently removed.'
+        : 'No matching records found for deletion.'
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to process privacy deletion request.' });
   }
 });
 
@@ -928,6 +1032,14 @@ app.get('/api/admin/budget-requests', requireAdmin, (req, res) => {
   res.json({ success: true, stats, budgetRequests: filtered });
 });
 
+app.get('/api/admin/budget-requests/:id', requireAdmin, (req, res) => {
+  const reqItem = db.getBudgetRequestById(req.params.id);
+  if (!reqItem) {
+    return res.status(404).json({ error: 'Budget request not found.' });
+  }
+  res.json({ success: true, budgetRequest: reqItem });
+});
+
 app.patch('/api/admin/budget-requests/:id', requireAdmin, (req, res) => {
   const updated = db.updateBudgetRequest(req.params.id, req.body);
   if (!updated) return res.status(404).json({ error: 'Budget request not found.' });
@@ -1005,6 +1117,26 @@ app.post('/api/admin/settings', requireAdmin, (req, res) => {
   res.json({ success: true, settings: updated });
 });
 
+// Catch-all for API routes to ALWAYS return JSON and never HTML
+app.all('/api/*', (req, res) => {
+  res.status(404).json({
+    success: false,
+    error: `API endpoint ${req.method} ${req.originalUrl} not found`
+  });
+});
+
+// JSON Error Handling Middleware for API
+app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if (req.originalUrl.startsWith('/api/')) {
+    console.error('API Error:', err);
+    return res.status(err.status || 500).json({
+      success: false,
+      error: err.message || 'Internal Server Error'
+    });
+  }
+  next(err);
+});
+
 // ================= FRONTEND VITE INTEGRATION =================
 async function startServer() {
   if (!isProd) {
@@ -1030,7 +1162,10 @@ async function startServer() {
   } else {
     const distPath = path.resolve(process.cwd(), 'dist');
     app.use(express.static(distPath));
-    app.get('*', (_req, res) => {
+    app.get('*', (req, res) => {
+      if (req.originalUrl.startsWith('/api/') || req.originalUrl.startsWith('/uploads/')) {
+        return res.status(404).json({ success: false, error: 'Endpoint not found' });
+      }
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }

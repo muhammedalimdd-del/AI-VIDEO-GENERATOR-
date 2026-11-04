@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Search, Clock, CheckCircle2, AlertCircle, Send, Video, Download, ArrowLeft, MessageSquare, ExternalLink, ShieldCheck } from 'lucide-react';
 import { getVideoRequestById } from '../services/firestoreService.ts';
+import { safeFetchJson, safeResponseJson } from '../services/apiClient.ts';
 
 interface CustomerTrackerProps {
   initialRequestId?: string;
@@ -44,7 +45,7 @@ export const CustomerTracker: React.FC<CustomerTrackerProps> = ({
       let foundRequest: any = null;
 
       try {
-        const res = await fetch('/api/requests/track', {
+        const result = await safeFetchJson<{ request?: any; error?: string }>('/api/requests/track', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -53,12 +54,8 @@ export const CustomerTracker: React.FC<CustomerTrackerProps> = ({
           })
         });
 
-        const contentType = res.headers.get('content-type') || '';
-        if (contentType.includes('application/json')) {
-          const data = await res.json();
-          if (res.ok && data.request) {
-            foundRequest = data.request;
-          }
+        if (result.ok && result.data?.request) {
+          foundRequest = result.data.request;
         }
       } catch (netErr) {
         // Fallback for static hosting
@@ -112,7 +109,7 @@ export const CustomerTracker: React.FC<CustomerTrackerProps> = ({
     setReplySuccess(null);
 
     try {
-      const res = await fetch(`/api/requests/${requestData.id}/customer-message`, {
+      const result = await safeFetchJson<{ error?: string }>((`/api/requests/${requestData.id}/customer-message`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -122,8 +119,7 @@ export const CustomerTracker: React.FC<CustomerTrackerProps> = ({
         })
       });
 
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || 'Failed to submit response.');
+      if (!result.ok) throw new Error(result.data?.error || result.error || 'Failed to submit response.');
 
       setReplyMessage('');
       setReplySuccess('Your reply has been forwarded directly to the studio director!');

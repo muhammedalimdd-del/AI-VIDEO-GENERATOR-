@@ -16,6 +16,7 @@ import {
   ArrowLeft
 } from 'lucide-react';
 import { getVideoRequestsForUser, subscribeToUserRequests } from '../../services/firestoreService.ts';
+import { safeFetchJson } from '../../services/apiClient.ts';
 
 interface MyRequestsViewProps {
   currentUser: UserAccount;
@@ -55,13 +56,9 @@ export const MyRequestsView: React.FC<MyRequestsViewProps> = ({
       // 2. Fetch from backend API
       if (!loadedRequests || loadedRequests.length === 0) {
         try {
-          const res = await fetch(`/api/user/requests?email=${encodeURIComponent(currentUser.email)}&uid=${currentUser.uid}`);
-          const contentType = res.headers.get('content-type') || '';
-          if (res.ok && contentType.includes('application/json')) {
-            const data = await res.json();
-            if (data.requests && data.requests.length > 0) {
-              loadedRequests = data.requests;
-            }
+          const result = await safeFetchJson<{ requests?: VideoRequestClient[] }>(`/api/user/requests?email=${encodeURIComponent(currentUser.email)}&uid=${currentUser.uid}`);
+          if (result.ok && result.data?.requests && result.data.requests.length > 0) {
+            loadedRequests = result.data.requests;
           }
         } catch (netErr) {
           // Fallback for static hosting
@@ -113,17 +110,16 @@ export const MyRequestsView: React.FC<MyRequestsViewProps> = ({
   const handleQuoteDecision = async (requestId: string, action: 'accept' | 'decline') => {
     setActionLoadingId(requestId);
     try {
-      const res = await fetch(`/api/requests/${requestId}/quote-action`, {
+      const result = await safeFetchJson<{ error?: string }>(`/api/requests/${requestId}/quote-action`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action, customerEmail: currentUser.email })
       });
 
-      if (res.ok) {
+      if (result.ok) {
         await fetchUserRequests();
       } else {
-        const err = await res.json();
-        alert(err.error || 'Failed to submit quote decision.');
+        alert(result.data?.error || result.error || 'Failed to submit quote decision.');
       }
     } catch (e: any) {
       alert(e.message || 'Network error.');

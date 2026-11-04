@@ -983,6 +983,50 @@ class Database {
     return true;
   }
 
+  public addCustomerClarification(
+    requestId: string,
+    message: string
+  ): VideoRequest | null {
+    const request = this.getRequestById(requestId);
+    if (!request) return null;
+
+    if (!Array.isArray(request.clarifications)) {
+      request.clarifications = [];
+    }
+
+    request.clarifications.push({
+      id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      from: 'customer',
+      message: message.trim(),
+      timestamp: new Date().toISOString()
+    });
+    request.updatedAt = new Date().toISOString();
+    this.persist({ ...this.data });
+    return request;
+  }
+
+  public deleteVideoRequest(id?: string, email?: string): boolean {
+    const normId = (id || '').trim().toLowerCase();
+    const normEmail = (email || '').trim().toLowerCase();
+
+    let removed = false;
+    this.data.requests = this.data.requests.filter((r) => {
+      const matchId = normId && r.id.toLowerCase() === normId;
+      const matchEmail = normEmail && (r.customerEmail.toLowerCase() === normEmail || (r.userEmail && r.userEmail.toLowerCase() === normEmail));
+
+      if (matchId || (normEmail && matchEmail && !normId)) {
+        removed = true;
+        return false;
+      }
+      return true;
+    });
+
+    if (removed) {
+      this.persist({ ...this.data });
+    }
+    return removed;
+  }
+
   // ---------------- EMAIL LOGS & SETTINGS ----------------
 
   public logEmail(log: Omit<EmailLog, 'id' | 'sentAt'>): EmailLog {

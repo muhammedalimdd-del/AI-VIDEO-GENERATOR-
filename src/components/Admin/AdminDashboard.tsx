@@ -38,6 +38,7 @@ import {
   getAllBudgetRequestsFromFirestore,
   getAllUsersFromFirestore
 } from '../../services/firestoreService.ts';
+import { safeFetchJson, safeResponseJson } from '../../services/apiClient.ts';
 
 interface AdminDashboardProps {
   onClose: () => void;
@@ -187,15 +188,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ password: passwordInput })
         });
-        const contentType = res.headers.get('content-type') || '';
-        if (contentType.includes('application/json')) {
-          const data = await res.json();
-          if (res.ok && data.token) {
-            token = data.token;
-            loggedIn = true;
-          } else {
-            throw new Error(data.error || 'Invalid credentials');
-          }
+        const parsed = await safeResponseJson<any>(res);
+        if (parsed.ok && parsed.data?.token) {
+          token = parsed.data.token;
+          loggedIn = true;
+        } else if (parsed.data?.error) {
+          throw new Error(parsed.data.error);
         }
       } catch (err: any) {
         if (err.message && err.message.includes('Invalid credentials')) {
@@ -237,62 +235,48 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
         fetch('/api/admin/audit-logs', { headers: { 'x-admin-key': token } })
       ]);
 
-      if (reqRes.ok) {
-        const contentType = reqRes.headers.get('content-type') || '';
-        if (contentType.includes('application/json')) {
-          const d = await reqRes.json();
-          setRequests(d.requests || []);
-          if (d.stats) setStats(d.stats);
-          loadedRequests = true;
+      const [parsedReq, parsedBgt, parsedEml, parsedSet, parsedUsr, parsedAud] = await Promise.all([
+        safeResponseJson<any>(reqRes),
+        safeResponseJson<any>(bgtRes),
+        safeResponseJson<any>(emlRes),
+        safeResponseJson<any>(setRes),
+        safeResponseJson<any>(usrRes),
+        safeResponseJson<any>(audRes)
+      ]);
+
+      if (parsedReq.ok && parsedReq.data) {
+        setRequests(parsedReq.data.requests || []);
+        if (parsedReq.data.stats) setStats(parsedReq.data.stats);
+        loadedRequests = true;
+      }
+      if (parsedBgt.ok && parsedBgt.data) {
+        setBudgetRequests(parsedBgt.data.budgetRequests || []);
+        if (parsedBgt.data.stats) setBudgetStats(parsedBgt.data.stats);
+        loadedBudget = true;
+      }
+      if (parsedEml.ok && parsedEml.data) {
+        setEmailLogs(parsedEml.data.emailLogs || []);
+      }
+      if (parsedSet.ok && parsedSet.data) {
+        setSettings(parsedSet.data.settings);
+        const st = parsedSet.data;
+        if (st.settings) {
+          setSettingsOwnerEmail(st.settings.ownerNotificationEmail || 'muhammedalimdd@gmail.com');
+          setSettingsFromEmail(st.settings.emailFromAddress || 'muhammedalimdd@gmail.com');
+          setSettingsProvider(st.settings.emailProvider || 'gmail');
+          setSettingsSmtpHost(st.settings.smtpHost || 'smtp.gmail.com');
+          setSettingsSmtpPort(st.settings.smtpPort || 465);
+          setSettingsSmtpSecure(st.settings.smtpSecure !== undefined ? st.settings.smtpSecure : true);
+          setSettingsSmtpUser(st.settings.smtpUser || st.settings.ownerNotificationEmail || 'muhammedalimdd@gmail.com');
+          setSettingsSmtpPass(st.settings.smtpPass || '');
+          setSettingsApiKey(st.settings.apiKey || '');
         }
       }
-      if (bgtRes.ok) {
-        const contentType = bgtRes.headers.get('content-type') || '';
-        if (contentType.includes('application/json')) {
-          const b = await bgtRes.json();
-          setBudgetRequests(b.budgetRequests || []);
-          if (b.stats) setBudgetStats(b.stats);
-          loadedBudget = true;
-        }
+      if (parsedUsr.ok && parsedUsr.data) {
+        setUsers(parsedUsr.data.users || []);
       }
-      if (emlRes.ok) {
-        const contentType = emlRes.headers.get('content-type') || '';
-        if (contentType.includes('application/json')) {
-          const eml = await emlRes.json();
-          setEmailLogs(eml.emailLogs || []);
-        }
-      }
-      if (setRes.ok) {
-        const contentType = setRes.headers.get('content-type') || '';
-        if (contentType.includes('application/json')) {
-          const st = await setRes.json();
-          setSettings(st.settings);
-          if (st.settings) {
-            setSettingsOwnerEmail(st.settings.ownerNotificationEmail || 'muhammedalimdd@gmail.com');
-            setSettingsFromEmail(st.settings.emailFromAddress || 'muhammedalimdd@gmail.com');
-            setSettingsProvider(st.settings.emailProvider || 'gmail');
-            setSettingsSmtpHost(st.settings.smtpHost || 'smtp.gmail.com');
-            setSettingsSmtpPort(st.settings.smtpPort || 465);
-            setSettingsSmtpSecure(st.settings.smtpSecure !== undefined ? st.settings.smtpSecure : true);
-            setSettingsSmtpUser(st.settings.smtpUser || st.settings.ownerNotificationEmail || 'muhammedalimdd@gmail.com');
-            setSettingsSmtpPass(st.settings.smtpPass || '');
-            setSettingsApiKey(st.settings.apiKey || '');
-          }
-        }
-      }
-      if (usrRes.ok) {
-        const contentType = usrRes.headers.get('content-type') || '';
-        if (contentType.includes('application/json')) {
-          const u = await usrRes.json();
-          setUsers(u.users || []);
-        }
-      }
-      if (audRes.ok) {
-        const contentType = audRes.headers.get('content-type') || '';
-        if (contentType.includes('application/json')) {
-          const a = await audRes.json();
-          setAuditLogs(a.auditLogs || []);
-        }
+      if (parsedAud.ok && parsedAud.data) {
+        setAuditLogs(parsedAud.data.auditLogs || []);
       }
     } catch (e) {
       console.warn('Backend unavailable, checking local storage data', e);
@@ -377,21 +361,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
   const openRequestDrawer = async (reqId: string) => {
     setDrawerLoading(true);
     try {
-      const res = await fetch(`/api/admin/requests/${reqId}`, {
+      const result = await safeFetchJson<{ request?: any }>(`/api/admin/requests/${reqId}`, {
         headers: { 'x-admin-key': adminToken }
       });
-      const json = await res.json();
-      if (res.ok && json.request) {
-        setSelectedRequest(json.request);
-        setStatusToSet(json.request.status);
-        setEstDateToSet(json.request.estimatedCompletionDate || '');
-        setCustomerNotesToSet(json.request.customerVisibleNotes || '');
-        setVideoDeliveryUrl(json.request.completedVideo?.directLink || '');
-        if (json.request.quote?.amount) {
-          setQuoteAmount(json.request.quote.amount);
-          setQuoteCurrency(json.request.quote.currency || '₹');
-          setQuoteBreakdown(json.request.quote.breakdown || '');
-          setQuotePaymentLink(json.request.quote.paymentLink || '');
+      if (result.ok && result.data?.request) {
+        const req = result.data.request;
+        setSelectedRequest(req);
+        setStatusToSet(req.status);
+        setEstDateToSet(req.estimatedCompletionDate || '');
+        setCustomerNotesToSet(req.customerVisibleNotes || '');
+        setVideoDeliveryUrl(req.completedVideo?.directLink || '');
+        if (req.quote?.amount) {
+          setQuoteAmount(req.quote.amount);
+          setQuoteCurrency(req.quote.currency || '₹');
+          setQuoteBreakdown(req.quote.breakdown || '');
+          setQuotePaymentLink(req.quote.paymentLink || '');
         }
       }
     } catch (e) {
@@ -404,7 +388,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
   const handleUpdateRequest = async () => {
     if (!selectedRequest) return;
     try {
-      const res = await fetch(`/api/admin/requests/${selectedRequest.id}`, {
+      const result = await safeFetchJson<{ request?: any; error?: string }>(`/api/admin/requests/${selectedRequest.id}`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
@@ -417,14 +401,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
           internalNote: newInternalNote ? newInternalNote.trim() : undefined
         })
       });
-      const json = await res.json();
-      if (res.ok) {
-        setSelectedRequest(json.request);
+      if (result.ok && result.data?.request) {
+        setSelectedRequest(result.data.request);
         setNewInternalNote('');
         loadData();
         alert('Request updated successfully.');
       } else {
-        alert(json.error || 'Update failed');
+        alert(result.data?.error || result.error || 'Update failed');
       }
     } catch (e: any) {
       alert(e.message);
@@ -436,7 +419,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
     if (!selectedRequest || !quoteAmount) return;
     setIsSendingQuote(true);
     try {
-      const res = await fetch(`/api/admin/requests/${selectedRequest.id}/quote`, {
+      const result = await safeFetchJson<{ request?: any; error?: string }>(`/api/admin/requests/${selectedRequest.id}/quote`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -450,13 +433,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
           paymentLink: quotePaymentLink
         })
       });
-      const json = await res.json();
-      if (res.ok) {
-        setSelectedRequest(json.request);
+      if (result.ok && result.data?.request) {
+        setSelectedRequest(result.data.request);
         alert(`Custom quote of ${quoteCurrency}${quoteAmount} dispatched to customer email!`);
         loadData();
       } else {
-        alert(json.error || 'Failed to send quote');
+        alert(result.data?.error || result.error || 'Failed to send quote');
       }
     } catch (e: any) {
       alert(e.message);
@@ -470,7 +452,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
     if (!selectedRequest) return;
     const ref = prompt('Enter transaction reference / payment confirmation ID:', 'TXN-' + Date.now().toString().slice(-6));
     try {
-      const res = await fetch(`/api/admin/requests/${selectedRequest.id}/payment`, {
+      const result = await safeFetchJson<{ request?: any; error?: string }>(`/api/admin/requests/${selectedRequest.id}/payment`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -481,9 +463,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
           transactionRef: ref || 'Verified in Admin'
         })
       });
-      const json = await res.json();
-      if (res.ok) {
-        setSelectedRequest(json.request);
+      if (result.ok && result.data?.request) {
+        setSelectedRequest(result.data.request);
         alert('Payment verified! Production officially begun and customer notified.');
         loadData();
       }
@@ -499,7 +480,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
       return;
     }
     try {
-      const res = await fetch(`/api/admin/requests/${selectedRequest.id}/deliver-video`, {
+      const result = await safeFetchJson<{ request?: any; error?: string }>(`/api/admin/requests/${selectedRequest.id}/deliver-video`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -510,13 +491,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
           message: deliveryMessage.trim()
         })
       });
-      const json = await res.json();
-      if (res.ok) {
-        setSelectedRequest(json.request);
+      if (result.ok && result.data?.request) {
+        setSelectedRequest(result.data.request);
         alert('Completed video delivered to customer email successfully!');
         loadData();
       } else {
-        alert(json.error || 'Delivery failed');
+        alert(result.data?.error || result.error || 'Delivery failed');
       }
     } catch (e: any) {
       alert(e.message);
@@ -529,7 +509,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
     if (!reason) return;
 
     try {
-      const res = await fetch(`/api/admin/users/${uid}/trial-status`, {
+      const result = await safeFetchJson<{ error?: string }>(`/api/admin/users/${uid}/trial-status`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -540,12 +520,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
           reason
         })
       });
-      const json = await res.json();
-      if (res.ok) {
+      if (result.ok) {
         alert(`Trial status for ${userEmail} reset to eligible.`);
         loadData();
       } else {
-        alert(json.error || 'Failed to update trial status.');
+        alert(result.data?.error || result.error || 'Failed to update trial status.');
       }
     } catch (e: any) {
       alert(e.message);
@@ -555,13 +534,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
   // Idea & Budget Request Drawer
   const openBudgetDrawer = async (id: string) => {
     try {
-      const res = await fetch(`/api/admin/budget-requests/${id}`, {
+      const result = await safeFetchJson<{ budgetRequest?: any }>(`/api/admin/budget-requests/${id}`, {
         headers: { 'x-admin-key': adminToken }
       });
-      const json = await res.json();
-      if (res.ok && json.budgetRequest) {
-        setSelectedBudgetRequest(json.budgetRequest);
-        setBudgetStatusToSet(json.budgetRequest.status);
+      if (result.ok && result.data?.budgetRequest) {
+        setSelectedBudgetRequest(result.data.budgetRequest);
+        setBudgetStatusToSet(result.data.budgetRequest.status);
       }
     } catch (e) {
       console.error(e);
@@ -572,7 +550,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
     if (!selectedBudgetRequest || !budgetReplyMessage.trim()) return;
     setIsSendingBudgetReply(true);
     try {
-      const res = await fetch(`/api/admin/budget-requests/${selectedBudgetRequest.id}/reply`, {
+      const result = await safeFetchJson<{ budgetRequest?: any; error?: string }>(`/api/admin/budget-requests/${selectedBudgetRequest.id}/reply`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -580,14 +558,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
         },
         body: JSON.stringify({ message: budgetReplyMessage.trim() })
       });
-      const json = await res.json();
-      if (res.ok) {
-        setSelectedBudgetRequest(json.budgetRequest);
+      if (result.ok && result.data?.budgetRequest) {
+        setSelectedBudgetRequest(result.data.budgetRequest);
         setBudgetReplyMessage('');
         loadData();
         alert('Reply email dispatched to customer successfully!');
       } else {
-        alert(json.error || 'Failed to send reply');
+        alert(result.data?.error || result.error || 'Failed to send reply');
       }
     } catch (e: any) {
       alert(e.message);
@@ -601,7 +578,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
     setIsTestingEmail(true);
     setTestEmailResult(null);
     try {
-      const res = await fetch('/api/admin/email/test-connection', {
+      const result = await safeFetchJson<any>('/api/admin/email/test-connection', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -611,13 +588,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
           recipientEmail: settingsOwnerEmail.trim() || 'muhammedalimdd@gmail.com'
         })
       });
-      const data = await res.json();
+      const data = result.data || {};
       setTestEmailResult({
-        success: data.success,
+        success: !!data.success,
         recipient: data.recipient || settingsOwnerEmail || 'muhammedalimdd@gmail.com',
         subject: data.subject || 'AI VIDEO MAKER — TEST EMAIL',
-        message: data.message || 'Congratulations! Your AI Video Maker email notification system is connected. New customer video requests will be delivered to this Gmail inbox.',
-        error: data.error
+        message: data.message || (result.ok ? 'Congratulations! Your AI Video Maker email notification system is connected. New customer video requests will be delivered to this Gmail inbox.' : 'Connection attempt failed'),
+        error: data.error || result.error
       });
       loadData();
     } catch (err: any) {
@@ -637,15 +614,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
   const handleRetryEmail = async (logId: string) => {
     setRetryingLogId(logId);
     try {
-      const res = await fetch(`/api/admin/email/${logId}/retry`, {
+      const result = await safeFetchJson<any>(`/api/admin/email/${logId}/retry`, {
         method: 'POST',
         headers: { 'x-admin-key': adminToken }
       });
-      const data = await res.json();
-      if (data.success) {
+      const data = result.data || {};
+      if (result.ok && data.success) {
         alert('Email successfully sent to recipient!');
       } else {
-        alert(`Retry failed: ${data.error || 'Check SMTP / App Password credentials in Settings'}`);
+        alert(`Retry failed: ${data.error || result.error || 'Check SMTP / App Password credentials in Settings'}`);
       }
       loadData();
     } catch (e: any) {
@@ -659,15 +636,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
   const handleResendOwnerEmail = async (requestId: string) => {
     setIsResendingOwnerEmail(true);
     try {
-      const res = await fetch(`/api/admin/requests/${requestId}/resend-owner-email`, {
+      const result = await safeFetchJson<any>(`/api/admin/requests/${requestId}/resend-owner-email`, {
         method: 'POST',
         headers: { 'x-admin-key': adminToken }
       });
-      const data = await res.json();
-      if (data.success) {
+      const data = result.data || {};
+      if (result.ok && data.success) {
         alert(`Complete video request brief dispatched to ${settingsOwnerEmail || 'muhammedalimdd@gmail.com'}!`);
       } else {
-        alert(`Failed to send email: ${data.error || 'Please configure SMTP in settings.'}`);
+        alert(`Failed to send email: ${data.error || result.error || 'Please configure SMTP in settings.'}`);
       }
       loadData();
     } catch (e: any) {
@@ -682,7 +659,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
     if (e) e.preventDefault();
     setIsSavingSettings(true);
     try {
-      const res = await fetch('/api/admin/settings', {
+      const result = await safeFetchJson<any>('/api/admin/settings', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -700,12 +677,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onClose }) => {
           apiKey: settingsApiKey.trim()
         })
       });
-      const data = await res.json();
-      if (res.ok) {
+      if (result.ok) {
         alert('Email settings saved successfully! You can now test the Gmail connection.');
         loadData();
       } else {
-        alert(data.error || 'Failed to save settings');
+        alert(result.data?.error || result.error || 'Failed to save settings');
       }
     } catch (e: any) {
       alert(`Error: ${e.message}`);

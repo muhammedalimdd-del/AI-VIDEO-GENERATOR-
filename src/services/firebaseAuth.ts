@@ -8,6 +8,7 @@ import {
 import { auth } from './firebase.ts';
 import { UserAccount, TrialStatus } from '../types/client.ts';
 import { saveUserToFirestore, getUserFromFirestore } from './firestoreService.ts';
+import { safeFetchJson } from './apiClient.ts';
 export { auth };
 
 const provider = new GoogleAuthProvider();
@@ -30,7 +31,7 @@ export const initAuthListener = (
       let resolvedProfile: UserAccount | null = null;
       try {
         // Sync with backend to get persisted database user & trial status
-        const res = await fetch('/api/auth/google-sync', {
+        const syncResult = await safeFetchJson<{ user?: UserAccount }>('/api/auth/google-sync', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -41,9 +42,8 @@ export const initAuthListener = (
           })
         });
 
-        if (res.ok) {
-          const data = await res.json();
-          resolvedProfile = data.user;
+        if (syncResult.ok && syncResult.data?.user) {
+          resolvedProfile = syncResult.data.user;
         }
       } catch (err) {
         console.error('Failed to sync authenticated Google user with backend:', err);
@@ -102,7 +102,7 @@ export const signInWithGoogle = async (): Promise<{
     cachedAccessToken = credential?.accessToken || null;
 
     // Persist and fetch backend user profile
-    const res = await fetch('/api/auth/google-sync', {
+    const syncRes = await safeFetchJson<{ user?: UserAccount }>('/api/auth/google-sync', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -114,9 +114,8 @@ export const signInWithGoogle = async (): Promise<{
     });
 
     let profile: UserAccount;
-    if (res.ok) {
-      const data = await res.json();
-      profile = data.user;
+    if (syncRes.ok && syncRes.data?.user) {
+      profile = syncRes.data.user;
     } else {
       profile = {
         uid: result.user.uid,
@@ -167,12 +166,11 @@ export const fetchTrialEligibility = async (
     if (email) params.append('email', email);
     if (uid) params.append('uid', uid);
 
-    const res = await fetch(`/api/user/trial-eligibility?${params.toString()}`);
-    if (res.ok) {
-      const data = await res.json();
+    const result = await safeFetchJson<{ eligible?: boolean; trialStatus?: TrialStatus }>(`/api/user/trial-eligibility?${params.toString()}`);
+    if (result.ok && result.data) {
       return {
-        eligible: !!data.eligible,
-        trialStatus: data.trialStatus || 'eligible'
+        eligible: !!result.data.eligible,
+        trialStatus: result.data.trialStatus || 'eligible'
       };
     }
   } catch (e) {

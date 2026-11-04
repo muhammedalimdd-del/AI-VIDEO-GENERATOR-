@@ -4,6 +4,7 @@ import {
   Check, Smartphone, Monitor, Square, Clock, ShieldCheck, ArrowRight, HelpCircle
 } from 'lucide-react';
 import { saveBudgetRequestToFirestore } from '../../services/firestoreService.ts';
+import { safeFetchJson, safeResponseJson } from '../../services/apiClient.ts';
 
 interface BudgetContactFormProps {
   onBackToHome?: () => void;
@@ -113,10 +114,9 @@ export const BudgetContactForm: React.FC<BudgetContactFormProps> = ({ onBackToHo
           method: 'POST',
           body: fd
         });
-        const contentType = res.headers.get('content-type') || '';
-        if (res.ok && contentType.includes('application/json')) {
-          const data = await res.json();
-          if (data.fileUrl) photoUrl = data.fileUrl;
+        const uploadParsed = await safeResponseJson<{ fileUrl?: string }>(res);
+        if (uploadParsed.ok && uploadParsed.data?.fileUrl) {
+          photoUrl = uploadParsed.data.fileUrl;
         }
       } catch (netErr) {
         // Fallback for static hosting
@@ -180,24 +180,21 @@ export const BudgetContactForm: React.FC<BudgetContactFormProps> = ({ onBackToHo
       let usedFallback = false;
 
       try {
-        const res = await fetch('/api/budget-requests', {
+        const fetchResult = await safeFetchJson<{ budgetRequest?: any; error?: string }>('/api/budget-requests', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
         });
 
-        const contentType = res.headers.get('content-type') || '';
-        if (contentType.includes('application/json')) {
-          const json = await res.json();
-          if (!res.ok) {
-            throw new Error(json.error || 'Failed to submit request.');
-          }
-          budgetRequestData = json.budgetRequest;
+        if (fetchResult.ok && fetchResult.data?.budgetRequest) {
+          budgetRequestData = fetchResult.data.budgetRequest;
+        } else if (fetchResult.data?.error) {
+          throw new Error(fetchResult.data.error);
         } else {
           usedFallback = true;
         }
       } catch (err: any) {
-        if (err.message && err.message.includes('Failed to submit request')) {
+        if (err.message && !err.message.includes('fetch') && !err.message.includes('Network')) {
           throw err;
         }
         usedFallback = true;

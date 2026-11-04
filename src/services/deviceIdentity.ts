@@ -7,6 +7,8 @@
  * 3. Server-side validation enforcing the strict One-Account-Per-Device policy
  */
 
+import { safeFetchJson } from './apiClient.ts';
+
 const DEVICE_STORAGE_KEY = 'aivm_device_id';
 const SESSION_TOKEN_KEY = 'aivm_session_token';
 const CACHED_USER_KEY = 'aivm_cached_user';
@@ -227,14 +229,14 @@ export async function checkDeviceRegistrationStatus(): Promise<DeviceStatusRespo
   const { fingerprintHash } = await computeHardwareFingerprint();
 
   try {
-    const res = await fetch('/api/device/status', {
+    const result = await safeFetchJson<any>('/api/device/status', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ deviceId, fingerprintHash })
     });
 
-    if (res.ok) {
-      const data = await res.json();
+    if (result.ok && result.data) {
+      const data = result.data;
       if (data.deviceId && data.deviceId !== deviceId) {
         // Sync reconciled device ID
         localStorage.setItem(DEVICE_STORAGE_KEY, data.deviceId);
@@ -269,7 +271,7 @@ export async function registerDeviceAccount(params: {
   const deviceId = getPersistentDeviceId();
   const { fingerprintHash, hardwareProfile } = await computeHardwareFingerprint();
 
-  const res = await fetch('/api/auth/register-device', {
+  const result = await safeFetchJson<{ user?: any; token?: string; error?: string }>('/api/auth/register-device', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -283,11 +285,11 @@ export async function registerDeviceAccount(params: {
     })
   });
 
-  const data = await res.json();
-  if (!res.ok) {
-    throw new Error(data.error || 'Failed to create account.');
+  if (!result.ok || !result.data?.token) {
+    throw new Error(result.data?.error || result.error || 'Failed to create account.');
   }
 
+  const data = result.data;
   // Save session token
   if (data.token) {
     try {
@@ -300,7 +302,7 @@ export async function registerDeviceAccount(params: {
     } catch {}
   }
 
-  return { user: data.user, token: data.token };
+  return { user: data.user, token: data.token! };
 }
 
 /**
@@ -313,7 +315,7 @@ export async function loginDeviceAccount(params: {
   const deviceId = getPersistentDeviceId();
   const { fingerprintHash } = await computeHardwareFingerprint();
 
-  const res = await fetch('/api/auth/login-device', {
+  const result = await safeFetchJson<{ user?: any; token?: string; error?: string }>('/api/auth/login-device', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -324,11 +326,11 @@ export async function loginDeviceAccount(params: {
     })
   });
 
-  const data = await res.json();
-  if (!res.ok) {
-    throw new Error(data.error || 'Invalid username or password. Please try again.');
+  if (!result.ok || !result.data?.token) {
+    throw new Error(result.data?.error || result.error || 'Invalid username or password. Please try again.');
   }
 
+  const data = result.data;
   // Save session token
   if (data.token) {
     try {
@@ -341,7 +343,7 @@ export async function loginDeviceAccount(params: {
     } catch {}
   }
 
-  return { user: data.user, token: data.token };
+  return { user: data.user, token: data.token! };
 }
 
 /**
@@ -356,22 +358,20 @@ export async function checkActiveSession(): Promise<any | null> {
   if (!token) return null;
 
   try {
-    const res = await fetch('/api/auth/session', {
+    const result = await safeFetchJson<{ user?: any; error?: string }>('/api/auth/session', {
       headers: {
         Authorization: `Bearer ${token}`,
         'x-session-token': token
       }
     });
 
-    if (res.ok) {
-      const data = await res.json();
-      if (data.user) {
-        try {
-          localStorage.setItem(CACHED_USER_KEY, JSON.stringify(data.user));
-        } catch {}
-        return data.user;
-      }
-    } else {
+    if (result.ok && result.data?.user) {
+      const user = result.data.user;
+      try {
+        localStorage.setItem(CACHED_USER_KEY, JSON.stringify(user));
+      } catch {}
+      return user;
+    } else if (result.status === 401 || result.status === 403) {
       // Session expired or invalidated on server
       try {
         localStorage.removeItem(SESSION_TOKEN_KEY);

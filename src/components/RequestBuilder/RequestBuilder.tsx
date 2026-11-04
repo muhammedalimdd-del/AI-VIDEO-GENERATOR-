@@ -10,6 +10,7 @@ import { Step7CustomerDelivery } from './Step7CustomerDelivery.tsx';
 import { Step8ReviewSubmit } from './Step8ReviewSubmit.tsx';
 import { ArrowLeft, ArrowRight, RotateCcw, AlertCircle } from 'lucide-react';
 import { saveVideoRequestToFirestore } from '../../services/firestoreService.ts';
+import { safeFetchJson } from '../../services/apiClient.ts';
 
 interface RequestBuilderProps {
   initialStyle?: string;
@@ -253,23 +254,21 @@ export const RequestBuilder: React.FC<RequestBuilderProps> = ({
       let usedStaticFallback = false;
 
       try {
-        const response = await fetch('/api/requests', {
+        const fetchResult = await safeFetchJson<{ request?: any; error?: string }>('/api/requests', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(submissionPayload)
         });
 
-        const contentType = response.headers.get('content-type') || '';
-        if (contentType.includes('application/json')) {
-          result = await response.json();
-          if (!response.ok) {
-            throw new Error(result.error || 'Server rejected request submission.');
-          }
+        if (fetchResult.ok && fetchResult.data?.request) {
+          result = fetchResult.data;
+        } else if (fetchResult.data?.error) {
+          throw new Error(fetchResult.data.error);
         } else {
           usedStaticFallback = true;
         }
       } catch (netErr: any) {
-        if (netErr.message && netErr.message.includes('Server rejected')) {
+        if (netErr.message && !netErr.message.includes('fetch') && !netErr.message.includes('Network')) {
           throw netErr;
         }
         usedStaticFallback = true;
